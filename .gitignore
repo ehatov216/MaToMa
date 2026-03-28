@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# Playwright MCP cache
+.playwright-mcp/
+
+# Python
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Editor
+.vscode/

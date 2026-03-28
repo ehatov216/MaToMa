@@ -1,0 +1,45 @@
+[
+  {
+    "date": "2026-03-28",
+    "synth": "matoma_basic",
+    "session": [
+      {
+        "trial": 1,
+        "change": "Saw波のみ（デフォルト）",
+        "evaluation": "悪い",
+        "comments": [
+          "音が細い",
+          "倍音が少ない",
+          "揺らぎが足りない",
+          "音場が狭い",
+          "空間的な広がりがない"
+        ]
+      },
+      {
+        "trial": 2,
+        "change": "複数Saw+デチューン+LFO+FreeVerb2",
+        "evaluation": "変わってない",
+        "comments": [
+          "ただオシレーターを鳴らしてるだけ"
+        ]
+      },
+      {
+        "trial": 3,
+        "change": "FM合成+BPFノイズ+広めのリバーブ",
+        "evaluation": "良くなった",
+        "comments": [
+          "音の複雑さが出てきた",
+          "豊かになった",
+          "もっと倍音をたくさん出してほしい"
+        ]
+      }
+    ]
+  },
+  {
+    "session_id": "2026-03-28-007",
+    "module": "drone",
+    "result": "better",
+    "comment": "良くなった。でも音がまだ小さい（何度も指摘している）",
+    "timestamp": "2026-03-28T21:54:00+09:00"
+  }
+]

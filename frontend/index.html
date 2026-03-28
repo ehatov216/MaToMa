@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>MaToMa</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0a0a0a;
+      color: #e0e0e0;
+      font-family: monospace;
+      padding: 2rem;
+    }
+    h1 { color: #7fff7f; margin-bottom: 0.25rem; font-size: 1.4rem; }
+    #status { font-size: 0.8rem; color: #888; margin-bottom: 0.4rem; }
+    #status.connected { color: #7fff7f; }
+    #sc-status {
+      font-size: 0.8rem;
+      color: #888;
+      margin-bottom: 1.6rem;
+      padding: 0.35rem 0.7rem;
+      border-radius: 4px;
+      background: #1a1a1a;
+      border-left: 3px solid #333;
+      display: inline-block;
+    }
+    #sc-status.sc-ready { border-left-color: #7fff7f; color: #7fff7f; }
+    #sc-status.sc-booting { border-left-color: #ffcc66; color: #ffcc66; }
+    #sc-status.sc-error { border-left-color: #ff7f7f; color: #ff7f7f; }
+
+    /* ── 共通パネル ── */
+    .panel {
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+      background: #111;
+    }
+    .panel h2 { color: #aaa; font-size: 0.85rem; margin-bottom: 1.25rem; letter-spacing: 0.1em; }
+
+    /* ── シーンボタン ── */
+    #scene-buttons {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .scene-btn {
+      padding: 0.5rem 1.2rem;
+      font-family: monospace;
+      font-size: 0.85rem;
+      border-radius: 4px;
+      border: 1px solid #3a3a3a;
+      background: #1a1a1a;
+      color: #ccc;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .scene-btn:hover { background: #2a2a2a; color: #fff; }
+    .scene-btn.active { background: #1e4d1e; border-color: #7fff7f; color: #7fff7f; }
+
+    /* ── 音コントロール ── */
+    #start-btn {
+      width: 100%;
+      padding: 0.7rem;
+      font-size: 1rem;
+      font-family: monospace;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+      margin-bottom: 1.5rem;
+      background: #1e4d1e;
+      color: #7fff7f;
+      transition: background 0.2s;
+    }
+    #start-btn.playing { background: #4d1e1e; color: #ff7f7f; }
+    #start-btn:hover { filter: brightness(1.2); }
+
+    #drone-btn {
+      width: 100%;
+      padding: 0.7rem;
+      font-size: 1rem;
+      font-family: monospace;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+      margin-bottom: 1.5rem;
+      background: #1a2e40;
+      color: #7fc4ff;
+      transition: background 0.2s;
+    }
+    #drone-btn.playing { background: #4d1e1e; color: #ff7f7f; }
+    #drone-btn:hover { filter: brightness(1.2); }
+
+    #granular-btn {
+      width: 100%;
+      padding: 0.7rem;
+      font-size: 1rem;
+      font-family: monospace;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+      margin-bottom: 1.5rem;
+      background: #2e1f0a;
+      color: #ffaa55;
+      transition: background 0.2s;
+    }
+    #granular-btn.playing { background: #4d1e1e; color: #ff7f7f; }
+    #granular-btn:hover { filter: brightness(1.2); }
+
+    .browse-row {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      margin-bottom: 1.25rem;
+    }
+    .browse-btn {
+      width: 100%;
+      padding: 0.5rem 0.8rem;
+      font-family: monospace;
+      font-size: 0.82rem;
+      border-radius: 4px;
+      border: 1px solid #ffaa55;
+      background: #1a1a1a;
+      color: #ffaa55;
+      cursor: pointer;
+      text-align: left;
+      transition: background 0.15s;
+    }
+    .browse-btn:hover { background: #2a2a2a; }
+    .browse-filename {
+      font-size: 0.72rem;
+      color: #777;
+      font-family: monospace;
+      padding: 0 0.2rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ── トリガーモードボタン ── */
+    .trig-mode-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.25rem;
+    }
+    .trig-btn {
+      flex: 1;
+      padding: 0.5rem;
+      font-family: monospace;
+      font-size: 0.8rem;
+      border-radius: 4px;
+      border: 1px solid #3a3a3a;
+      background: #1a1a1a;
+      color: #888;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .trig-btn:hover { background: #2a2a2a; color: #ccc; }
+    .trig-btn.active { background: #2e1f0a; border-color: #ffaa55; color: #ffaa55; }
+
+    .slider-row {
+      display: grid;
+      grid-template-columns: 80px 1fr 60px;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .slider-label { font-size: 0.8rem; color: #888; }
+    .slider-label span { display: block; font-size: 0.65rem; color: #555; }
+    input[type=range] { width: 100%; accent-color: #7fff7f; cursor: pointer; }
+    .slider-value { font-size: 0.85rem; color: #ffcc66; text-align: right; }
+
+    /* ── 自律モード ── */
+    .auto-toggle-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.25rem;
+    }
+    .auto-toggle {
+      flex: 1;
+      padding: 0.6rem;
+      font-family: monospace;
+      font-size: 0.9rem;
+      border-radius: 4px;
+      border: 1px solid #3a3a3a;
+      background: #1a1a1a;
+      color: #666;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .auto-toggle:hover { background: #2a2a2a; color: #ccc; }
+    .auto-toggle.active-off  { background: #2a1a1a; border-color: #884444; color: #ff7f7f; }
+    .auto-toggle.active-on   { background: #1a2e1a; border-color: #7fff7f; color: #7fff7f; }
+    #auto-targets {
+      border-top: 1px solid #2a2a2a;
+      margin-top: 1rem;
+      padding-top: 1rem;
+    }
+    #auto-targets .section-label {
+      font-size: 0.72rem;
+      color: #555;
+      letter-spacing: 0.1em;
+      margin-bottom: 0.75rem;
+    }
+
+    /* ── Tidal ── */
+    .tidal-start-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+      margin-bottom: 1.25rem;
+    }
+    .tidal-ctrl-btn {
+      padding: 0.6rem;
+      font-family: monospace;
+      font-size: 0.85rem;
+      border-radius: 4px;
+      border: 1px solid #3a3a3a;
+      background: #1a1a1a;
+      color: #888;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tidal-ctrl-btn:hover { background: #2a2a2a; color: #ccc; }
+    .tidal-ctrl-btn.running { background: #1a2e1a; border-color: #7fff7f; color: #7fff7f; }
+    .tidal-ctrl-btn.hush { background: #2e1a1a; border-color: #ff7f7f; color: #ff7f7f; }
+    .tidal-section-label {
+      font-size: 0.72rem;
+      color: #555;
+      letter-spacing: 0.1em;
+      margin: 1rem 0 0.6rem;
+    }
+    .tidal-select-row {
+      display: grid;
+      grid-template-columns: 80px 1fr;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    .tidal-select-row select {
+      background: #1a1a1a;
+      border: 1px solid #3a3a3a;
+      border-radius: 4px;
+      color: #ccc;
+      font-family: monospace;
+      font-size: 0.82rem;
+      padding: 0.35rem 0.5rem;
+      cursor: pointer;
+    }
+    .root-btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+      margin-bottom: 0.75rem;
+    }
+    .root-btn {
+      padding: 0.35rem 0.55rem;
+      font-family: monospace;
+      font-size: 0.75rem;
+      border-radius: 4px;
+      border: 1px solid #3a3a3a;
+      background: #1a1a1a;
+      color: #888;
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .root-btn:hover { background: #2a2a2a; color: #ccc; }
+    .root-btn.active { background: #1a2e3a; border-color: #55aaff; color: #55aaff; }
+    .tidal-play-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+    .tidal-play-btn {
+      padding: 0.55rem;
+      font-family: monospace;
+      font-size: 0.82rem;
+      border-radius: 4px;
+      border: 1px solid #3a3a3a;
+      background: #1a1a2e;
+      color: #aaaaff;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tidal-play-btn:hover { background: #2a2a40; color: #fff; }
+    .tidal-play-btn.active { background: #1a2e1a; border-color: #7fff7f; color: #7fff7f; }
+    #tidal-code-preview {
+      margin-top: 0.75rem;
+      font-size: 0.72rem;
+      color: #555;
+      background: #0d0d0d;
+      border: 1px solid #222;
+      border-radius: 4px;
+      padding: 0.5rem 0.7rem;
+      font-family: monospace;
+      min-height: 2.5rem;
+      white-space: pre;
+      overflow-x: auto;
+    }
+
+    /* ── ログ ── */
+    #log-panel { border: 1px solid #2a2a2a; border-radius: 6px; background: #111; }
+    #log-panel h2 { color: #aaa; font-size: 0.85rem; padding: 0.75rem 1rem; border-bottom: 1px solid #2a2a2a; letter-spacing: 0.1em; }
+    #log { padding: 0.75rem 1rem; height: 150px; overflow-y: auto; font-size: 0.78rem; }
+    .log-entry { margin: 0.2rem 0; }
+    .log-entry .time { color: #444; margin-right: 0.5rem; }
+    .log-entry .addr { color: #7fb3ff; }
+    .log-entry .args { color: #ffcc66; }
+  </style>
+</head>
+<body>
+  <h1>MaToMa</h1>
+  <div id="status">接続中...</div>
+  <div id="sc-status">SC: 確認中...</div>
+
+  <!-- シーン選択 -->
+  <div class="panel">
+    <h2>SCENE</h2>
+    <div id="scene-buttons">
+      <button class="scene-btn" onclick="selectScene('暗い')">暗い</button>
+      <button class="scene-btn" onclick="selectScene('標準')">標準</button>
+      <button class="scene-btn" onclick="selectScene('明るい')">明るい</button>
+      <button class="scene-btn" onclick="selectScene('高音・静か')">高音・静か</button>
+    </div>
+  </div>
+
+  <!-- シンセ -->
+  <div class="panel">
+    <h2>SYNTH</h2>
+    <button id="start-btn" onclick="toggleSound()">▶ 音を鳴らす</button>
+    <div class="slider-row">
+      <div class="slider-label">freq<span>音の高さ</span></div>
+      <input type="range" id="freq" min="55" max="880" value="220" step="1"
+             oninput="sendParam('freq', this.value, 'freq-val')">
+      <div class="slider-value" id="freq-val">220 Hz</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">cutoff<span>音の明るさ</span></div>
+      <input type="range" id="cutoff" min="200" max="8000" value="1000" step="10"
+             oninput="sendParam('cutoff', this.value, 'cutoff-val')">
+      <div class="slider-value" id="cutoff-val">1000 Hz</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">amp<span>音量</span></div>
+      <input type="range" id="amp" min="0" max="1" value="0.6" step="0.01"
+             oninput="sendParam('amp', this.value, 'amp-val')">
+      <div class="slider-value" id="amp-val">0.60</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">chaos<span>有機的な揺らぎ</span></div>
+      <input type="range" id="chaos" min="0" max="1" value="0.4" step="0.01"
+             oninput="sendParam('chaos', this.value, 'chaos-val')">
+      <div class="slider-value" id="chaos-val">0.40</div>
+    </div>
+  </div>
+
+  <!-- ドローン -->
+  <div class="panel">
+    <h2>DRONE</h2>
+    <button id="drone-btn" onclick="toggleDrone()">▶ ドローンを鳴らす</button>
+    <div class="slider-row">
+      <div class="slider-label">freq<span>根音</span></div>
+      <input type="range" id="drone-freq" min="40" max="220" value="60" step="1"
+             oninput="sendDroneParam('freq', this.value, 'drone-freq-val')">
+      <div class="slider-value" id="drone-freq-val">60 Hz</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">detune<span>揺らぎ・厚み</span></div>
+      <input type="range" id="drone-detune" min="0" max="1" value="0.3" step="0.01"
+             oninput="sendDroneParam('detune', this.value, 'drone-detune-val')">
+      <div class="slider-value" id="drone-detune-val">0.30</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">cutoff<span>こもり具合</span></div>
+      <input type="range" id="drone-cutoff" min="80" max="3000" value="700" step="10"
+             oninput="sendDroneParam('cutoff', this.value, 'drone-cutoff-val')">
+      <div class="slider-value" id="drone-cutoff-val">700 Hz</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">drift<span>自律ゆらぎ</span></div>
+      <input type="range" id="drone-drift" min="0" max="1" value="0.1" step="0.01"
+             oninput="sendDroneParam('drift', this.value, 'drone-drift-val')">
+      <div class="slider-value" id="drone-drift-val">0.10</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">room<span>残響への溶け込み</span></div>
+      <input type="range" id="drone-room" min="0" max="1" value="0.88" step="0.01"
+             oninput="sendDroneParam('room', this.value, 'drone-room-val')">
+      <div class="slider-value" id="drone-room-val">0.88</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">残響時間<span>漂い続ける長さ</span></div>
+      <input type="range" id="drone-revtime" min="1" max="25" value="12" step="0.5"
+             oninput="sendDroneParam('revtime', this.value, 'drone-revtime-val')">
+      <div class="slider-value" id="drone-revtime-val">12.0 s</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">amp<span>音量</span></div>
+      <input type="range" id="drone-amp" min="0" max="2" value="1.8" step="0.01"
+             oninput="sendDroneParam('amp', this.value, 'drone-amp-val')">
+      <div class="slider-value" id="drone-amp-val">1.80</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">breathe<span>呼吸・安らぎ</span></div>
+      <input type="range" id="drone-breathe" min="0" max="1" value="0.5" step="0.01"
+             oninput="sendDroneParam('breathe', this.value, 'drone-breathe-val')">
+      <div class="slider-value" id="drone-breathe-val">0.50</div>
+    </div>
+  </div>
+
+  <!-- グラニューラサンプラー -->
+  <div class="panel">
+    <h2>GRANULAR</h2>
+    <div class="browse-row">
+      <button class="browse-btn" onclick="browseGranularFile()">📂 ファイルを選択...</button>
+      <div class="browse-filename" id="granular-filename">（未選択 — デモ用サイン波を使用）</div>
+    </div>
+    <button id="granular-btn" onclick="toggleGranular()">▶ グラニューラを鳴らす</button>
+    <div class="trig-mode-row">
+      <button class="trig-btn active" id="trig-dust" onclick="setTrigMode(0)">
+        DUST（ランダム間隔）
+      </button>
+      <button class="trig-btn" id="trig-impulse" onclick="setTrigMode(1)">
+        IMPULSE（等間隔）
+      </button>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">pos<span>再生位置</span></div>
+      <input type="range" id="gran-pos" min="0" max="1" value="0" step="0.01"
+             oninput="sendGranularParam('pos', this.value, 'gran-pos-val')">
+      <div class="slider-value" id="gran-pos-val">0.00</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">posrand<span>位置ランダム幅</span></div>
+      <input type="range" id="gran-posrand" min="0" max="0.5" value="0.05" step="0.01"
+             oninput="sendGranularParam('posrand', this.value, 'gran-posrand-val')">
+      <div class="slider-value" id="gran-posrand-val">0.05</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">pitchrand<span>ピッチランダム幅</span></div>
+      <input type="range" id="gran-pitchrand" min="0" max="0.5" value="0.01" step="0.01"
+             oninput="sendGranularParam('pitchrand', this.value, 'gran-pitchrand-val')">
+      <div class="slider-value" id="gran-pitchrand-val">0.01</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">size<span>粒の大きさ</span></div>
+      <input type="range" id="gran-size" min="0.01" max="0.5" value="0.1" step="0.01"
+             oninput="sendGranularParam('size', this.value, 'gran-size-val')">
+      <div class="slider-value" id="gran-size-val">0.10 s</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">density<span>粒の密度</span></div>
+      <input type="range" id="gran-density" min="1" max="100" value="20" step="1"
+             oninput="sendGranularParam('density', this.value, 'gran-density-val')">
+      <div class="slider-value" id="gran-density-val">20</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">rate<span>ピッチ</span></div>
+      <input type="range" id="gran-rate" min="0.25" max="4" value="1" step="0.01"
+             oninput="sendGranularParam('rate', this.value, 'gran-rate-val')">
+      <div class="slider-value" id="gran-rate-val">1.00</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">amp<span>音量</span></div>
+      <input type="range" id="gran-amp" min="0" max="1" value="0.5" step="0.01"
+             oninput="sendGranularParam('amp', this.value, 'gran-amp-val')">
+      <div class="slider-value" id="gran-amp-val">0.50</div>
+    </div>
+  </div>
+
+  <!-- 自律モード -->
+  <div class="panel">
+    <h2>AUTONOMOUS MODE</h2>
+
+    <!-- ON / OFF -->
+    <div class="auto-toggle-row">
+      <button id="auto-off-btn" class="auto-toggle active-off" onclick="setAutoRunning(false)">■ OFF</button>
+      <button id="auto-on-btn"  class="auto-toggle"            onclick="setAutoRunning(true)">▶ ON</button>
+    </div>
+
+    <!-- モード選択 -->
+    <div class="trig-mode-row">
+      <button class="trig-btn active" id="auto-random"   onclick="setAutoMode('random')">
+        ランダム<br><span style="font-size:0.68rem;color:#777">自由にさまよう</span>
+      </button>
+      <button class="trig-btn"        id="auto-directed" onclick="setAutoMode('directed')">
+        方向指定<br><span style="font-size:0.68rem;color:#777">目標値へ向かう</span>
+      </button>
+    </div>
+
+    <!-- 速度 -->
+    <div class="slider-row">
+      <div class="slider-label">速度<span>変化の速さ</span></div>
+      <input type="range" id="auto-speed" min="0" max="1" value="0.3" step="0.01"
+             oninput="setAutoSpeed(this.value)">
+      <div class="slider-value" id="auto-speed-val">0.30</div>
+    </div>
+
+    <!-- Tidal 自律モード -->
+    <div style="border-top: 1px solid #2a2a2a; margin-top: 1rem; padding-top: 1rem;">
+      <div class="section-label" style="font-size:0.72rem;color:#555;letter-spacing:0.1em;margin-bottom:0.75rem;">
+        TIDAL AUTO — コード進行の自動演奏
+      </div>
+      <div class="auto-toggle-row">
+        <button id="tidal-auto-off-btn" class="auto-toggle active-off"
+                onclick="setTidalAuto(false)">■ OFF</button>
+        <button id="tidal-auto-on-btn"  class="auto-toggle"
+                onclick="setTidalAuto(true)">▶ ON</button>
+      </div>
+      <div class="tidal-select-row" style="margin-bottom:0.5rem;">
+        <div class="slider-label">進行<span>コード</span></div>
+        <select id="auto-progression" onchange="setProgression(this.value)">
+          <option value="ambient_minor">ambient minor（7th系、浮遊感）</option>
+          <option value="dark_drone">dark drone（短調、緊張感）</option>
+          <option value="minimal_shift">minimal shift（2コード、ミニマル）</option>
+          <option value="alva_noto">alva noto（6コード、複雑）</option>
+          <option value="bright_drift">bright drift（長調、明るい流れ）</option>
+        </select>
+      </div>
+      <div id="tidal-auto-indicator" style="font-size:0.75rem;color:#555;padding:0.3rem 0.2rem;">
+        — 待機中 —
+      </div>
+    </div>
+
+    <!-- 方向指定: 目標値（directed モード時のみ表示） -->
+    <div id="auto-targets" style="display:none;">
+      <div class="section-label">TARGET — 方向指定の目標値</div>
+      <div class="slider-row">
+        <div class="slider-label">synth freq<span>目標の音の高さ</span></div>
+        <input type="range" id="target-freq" min="55" max="880" value="220" step="1"
+               oninput="setAutoTarget('freq', this.value, 'target-freq-val', ' Hz', true)">
+        <div class="slider-value" id="target-freq-val">220 Hz</div>
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">synth cutoff<span>目標の明るさ</span></div>
+        <input type="range" id="target-cutoff" min="200" max="8000" value="1000" step="10"
+               oninput="setAutoTarget('cutoff', this.value, 'target-cutoff-val', ' Hz', true)">
+        <div class="slider-value" id="target-cutoff-val">1000 Hz</div>
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">drone freq<span>目標の根音</span></div>
+        <input type="range" id="target-drone-freq" min="40" max="220" value="60" step="1"
+               oninput="setAutoTarget('drone_freq', this.value, 'target-drone-freq-val', ' Hz', true)">
+        <div class="slider-value" id="target-drone-freq-val">60 Hz</div>
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">drone drift<span>目標のゆらぎ</span></div>
+        <input type="range" id="target-drone-drift" min="0" max="1" value="0.1" step="0.01"
+               oninput="setAutoTarget('drone_drift', this.value, 'target-drone-drift-val', '', false)">
+        <div class="slider-value" id="target-drone-drift-val">0.10</div>
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">drone room<span>目標の残響</span></div>
+        <input type="range" id="target-drone-room" min="0" max="1" value="0.6" step="0.01"
+               oninput="setAutoTarget('drone_room', this.value, 'target-drone-room-val', '', false)">
+        <div class="slider-value" id="target-drone-room-val">0.60</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tidal Cycles -->
+  <div class="panel">
+    <h2>TIDAL CYCLES</h2>
+
+    <!-- 起動 / 停止 -->
+    <div class="tidal-start-row">
+      <button id="tidal-start-btn" class="tidal-ctrl-btn" onclick="tidalStart()">▶ TIDAL START</button>
+      <button class="tidal-ctrl-btn hush" onclick="tidalHush()">■ HUSH（全停止）</button>
+    </div>
+
+    <!-- テンポ -->
+    <div class="tidal-section-label">TEMPO</div>
+    <div class="slider-row">
+      <div class="slider-label">BPM<span>速さ</span></div>
+      <input type="range" id="tidal-bpm" min="40" max="200" value="120" step="1"
+             oninput="updateBpmDisplay(this.value)">
+      <div class="slider-value" id="tidal-bpm-val">120</div>
+    </div>
+    <button class="tidal-ctrl-btn" style="width:100%;margin-bottom:0.75rem"
+            onclick="applyTempo()">SET TEMPO</button>
+
+    <!-- ルートノート -->
+    <div class="tidal-section-label">ROOT NOTE</div>
+    <div class="root-btn-row" id="root-btns">
+      <button class="root-btn active" onclick="selectRoot('C')">C</button>
+      <button class="root-btn" onclick="selectRoot('C#')">C#</button>
+      <button class="root-btn" onclick="selectRoot('D')">D</button>
+      <button class="root-btn" onclick="selectRoot('D#')">D#</button>
+      <button class="root-btn" onclick="selectRoot('E')">E</button>
+      <button class="root-btn" onclick="selectRoot('F')">F</button>
+      <button class="root-btn" onclick="selectRoot('F#')">F#</button>
+      <button class="root-btn" onclick="selectRoot('G')">G</button>
+      <button class="root-btn" onclick="selectRoot('G#')">G#</button>
+      <button class="root-btn" onclick="selectRoot('A')">A</button>
+      <button class="root-btn" onclick="selectRoot('A#')">A#</button>
+      <button class="root-btn" onclick="selectRoot('B')">B</button>
+    </div>
+
+    <!-- スケール / コード -->
+    <div class="tidal-section-label">SCALE &amp; CHORD</div>
+    <div class="tidal-select-row">
+      <div class="slider-label">スケール<span>音階</span></div>
+      <select id="tidal-scale">
+        <option value="minor">minor（短調）</option>
+        <option value="major">major（長調）</option>
+        <option value="dorian">dorian</option>
+        <option value="phrygian">phrygian</option>
+        <option value="lydian">lydian</option>
+        <option value="mixolydian">mixolydian</option>
+        <option value="pentatonic">pentatonic（5音）</option>
+        <option value="major pentatonic">major pentatonic</option>
+        <option value="whole tone">whole tone（全音音階）</option>
+        <option value="chromatic">chromatic（半音階）</option>
+      </select>
+    </div>
+    <div class="tidal-select-row">
+      <div class="slider-label">コード<span>和音</span></div>
+      <select id="tidal-chord">
+        <option value="minor">minor（短三和音）</option>
+        <option value="major">major（長三和音）</option>
+        <option value="minor 7">minor 7</option>
+        <option value="major 7">major 7</option>
+        <option value="dominant 7">dominant 7</option>
+        <option value="diminished">diminished</option>
+        <option value="augmented">augmented</option>
+        <option value="suspended 2">suspended 2</option>
+        <option value="suspended 4">suspended 4</option>
+      </select>
+    </div>
+
+    <!-- シンセ / オクターブ -->
+    <div class="tidal-select-row">
+      <div class="slider-label">シンセ<span>音色</span></div>
+      <select id="tidal-synth">
+        <option value="superpiano">superpiano（ピアノ）</option>
+        <option value="superpad">superpad（パッド）</option>
+        <option value="supersaw">supersaw（のこぎり波）</option>
+        <option value="supersquare">supersquare（矩形波）</option>
+        <option value="superpwm">superpwm（PWM）</option>
+        <option value="superchip">superchip（チップ音）</option>
+      </select>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">オクターブ<span>高低</span></div>
+      <input type="range" id="tidal-octave" min="2" max="6" value="4" step="1"
+             oninput="document.getElementById('tidal-octave-val').textContent = this.value">
+      <div class="slider-value" id="tidal-octave-val">4</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">音量<span>amp</span></div>
+      <input type="range" id="tidal-amp" min="0" max="1" value="0.5" step="0.01"
+             oninput="document.getElementById('tidal-amp-val').textContent = parseFloat(this.value).toFixed(2)">
+      <div class="slider-value" id="tidal-amp-val">0.50</div>
+    </div>
+
+    <!-- 再生ボタン -->
+    <div class="tidal-play-row">
+      <button class="tidal-play-btn" id="tidal-chord-btn" onclick="playChord()">
+        ♩ コードを鳴らす<br><span style="font-size:0.68rem;color:#777">トラック d1</span>
+      </button>
+      <button class="tidal-play-btn" id="tidal-scale-btn" onclick="playScale()">
+        ♫ スケールを鳴らす<br><span style="font-size:0.68rem;color:#777">アルペジオ d2</span>
+      </button>
+    </div>
+
+    <!-- 生成されたTidalコードのプレビュー -->
+    <div id="tidal-code-preview">-- ここに送信したTidalコードが表示されます</div>
+  </div>
+
+  <!-- ログ -->
+  <div id="log-panel">
+    <h2>LOG</h2>
+    <div id="log"></div>
+  </div>
+
+  <script>
+    const WS_URL = "ws://localhost:8765";
+    let ws;
+    let isPlaying = false;
+    let isDronePlaying = false;
+    let isGranularPlaying = false;
+
+    let reconnectTimer = null;
+    let reconnectDelay = 1000;   // 初回は1秒後
+    const RECONNECT_MAX = 30000; // 最大30秒
+
+    function scheduleReconnect() {
+      if (reconnectTimer !== null) return;
+      const sec = (reconnectDelay / 1000).toFixed(0);
+      setStatus(`切断 — ${sec}秒後に再接続（bridge.py が起動しているか確認してください）`, false);
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX);
+    }
+
+    // WS切断・再接続時にGUIの状態を初期状態へリセットする
+    function resetPlayState() {
+      isPlaying = false;
+      isDronePlaying = false;
+      isGranularPlaying = false;
+
+      const startBtn = document.getElementById("start-btn");
+      startBtn.textContent = "▶ 音を鳴らす";
+      startBtn.classList.remove("playing");
+
+      const droneBtn = document.getElementById("drone-btn");
+      droneBtn.textContent = "▶ ドローンを鳴らす";
+      droneBtn.classList.remove("playing");
+
+      const granularBtn = document.getElementById("granular-btn");
+      granularBtn.textContent = "▶ グラニューラを鳴らす";
+      granularBtn.classList.remove("playing");
+    }
+
+    function setSCStatus(text, state) {
+      const el = document.getElementById("sc-status");
+      el.textContent = "SC: " + text;
+      el.className = state; // "sc-ready" | "sc-booting" | "sc-error" | ""
+    }
+
+    function connect() {
+      ws = new WebSocket(WS_URL);
+      ws.onopen = () => {
+        reconnectDelay = 1000;
+        setStatus("接続済み", true);
+        addLog("system", "接続完了");
+        // 再接続のたびに再生状態をリセット（SCも再起動している可能性がある）
+        resetPlayState();
+      };
+      ws.onclose = () => {
+        setSCStatus("不明（切断中）", "");
+        scheduleReconnect();
+      };
+      ws.onerror = () => { /* onclose が必ず続けて発火するので何もしない */ };
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.type === "sc_ready") {
+          setSCStatus("起動完了 ✓", "sc-ready");
+          addLog("system", ["SC起動完了"]);
+        } else if (msg.type === "sc_status") {
+          // 接続直後の初期状態通知
+          if (msg.ready) {
+            setSCStatus("起動完了 ✓", "sc-ready");
+          } else {
+            setSCStatus("起動中...", "sc-booting");
+          }
+        } else if (msg.type === "sc_booting") {
+          setSCStatus("起動中...", "sc-booting");
+          addLog("system", [msg.message]);
+        } else if (msg.type === "sc_error") {
+          setSCStatus("エラー ✗", "sc-error");
+          addLog("sc_error", [msg.message]);
+        } else if (msg.type === "scene_changed") {
+          applyScene(msg.scene);
+        } else if (msg.type === "autonomous_update") {
+          applyAutoUpdate(msg.params);
+        } else if (msg.type === "tidal_started") {
+          onTidalStarted(msg);
+        } else if (msg.type === "tidal_stopped") {
+          onTidalStopped();
+        } else if (msg.type === "tidal_error") {
+          addLog("tidal_error", [msg.message]);
+        } else if (msg.type === "tidal_state") {
+          addLog("tidal_state", [JSON.stringify(msg.state)]);
+        } else if (msg.type === "tidal_applied") {
+          showTidalCode(msg.code);
+        } else if (msg.type === "tidal_auto_step") {
+          onTidalAutoStep(msg);
+        } else if (msg.type === "granular_file_selected") {
+          const filename = msg.path.split("/").pop();
+          document.getElementById("granular-filename").textContent = filename;
+          document.getElementById("granular-filename").title = msg.path;
+          addLog("/matoma/granular/load", [msg.path]);
+        } else {
+          addLog(msg.address, msg.args);
+        }
+      };
+    }
+
+    function send(message) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(message));
+      } else {
+        addLog("⚠ 送信失敗", ["bridge.py に接続されていません"]);
+      }
+    }
+
+    // シーン選択
+    function selectScene(name) {
+      send({ address: "/matoma/scene", args: [name] });
+      // アクティブボタンを更新
+      document.querySelectorAll(".scene-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.textContent === name);
+      });
+      addLog("/matoma/scene", [name]);
+    }
+
+    // ブリッジからシーンデータが返ってきたらスライダーを更新
+    function applyScene(scene) {
+      const map = {
+        freq:   { id: "freq",   display: "freq-val",   unit: " Hz" },
+        cutoff: { id: "cutoff", display: "cutoff-val", unit: " Hz" },
+        amp:    { id: "amp",    display: "amp-val",    unit: "" },
+      };
+      for (const [param, cfg] of Object.entries(map)) {
+        if (scene[param] == null) continue;
+        const el = document.getElementById(cfg.id);
+        const disp = document.getElementById(cfg.display);
+        el.value = scene[param];
+        disp.textContent = param === "amp"
+          ? parseFloat(scene[param]).toFixed(2)
+          : scene[param] + cfg.unit;
+      }
+    }
+
+    function toggleSound() {
+      if (!isPlaying) {
+        send({ address: "/matoma/start", args: [] });
+        isPlaying = true;
+        const btn = document.getElementById("start-btn");
+        btn.textContent = "■ 音を止める";
+        btn.classList.add("playing");
+      } else {
+        send({ address: "/matoma/stop", args: [] });
+        isPlaying = false;
+        const btn = document.getElementById("start-btn");
+        btn.textContent = "▶ 音を鳴らす";
+        btn.classList.remove("playing");
+      }
+    }
+
+    function toggleDrone() {
+      const btn = document.getElementById("drone-btn");
+      if (!isDronePlaying) {
+        send({ address: "/matoma/drone/start", args: [] });
+        isDronePlaying = true;
+        btn.textContent = "■ ドローンを止める";
+        btn.classList.add("playing");
+      } else {
+        send({ address: "/matoma/drone/stop", args: [] });
+        isDronePlaying = false;
+        btn.textContent = "▶ ドローンを鳴らす";
+        btn.classList.remove("playing");
+      }
+    }
+
+    function sendParam(param, rawValue, displayId) {
+      const value = parseFloat(rawValue);
+      const display = document.getElementById(displayId);
+      display.textContent = param === "amp" ? value.toFixed(2) : value + " Hz";
+      send({ address: "/matoma/param", args: [param, value] });
+    }
+
+    function sendDroneParam(param, rawValue, displayId) {
+      const value = parseFloat(rawValue);
+      const display = document.getElementById(displayId);
+      display.textContent = (param === "freq" || param === "cutoff") ? value + " Hz"
+        : param === "revtime" ? value.toFixed(1) + " s"
+        : value.toFixed(2);
+      send({ address: "/matoma/drone/param", args: [param, value] });
+    }
+
+    function browseGranularFile() {
+      send({ address: "/matoma/granular/browse", args: [] });
+      addLog("system", ["ファイル選択ダイアログを開いています..."]);
+    }
+
+    function toggleGranular() {
+      const btn = document.getElementById("granular-btn");
+      if (!isGranularPlaying) {
+        send({ address: "/matoma/granular/start", args: [] });
+        isGranularPlaying = true;
+        btn.textContent = "■ グラニューラを止める";
+        btn.classList.add("playing");
+      } else {
+        send({ address: "/matoma/granular/stop", args: [] });
+        isGranularPlaying = false;
+        btn.textContent = "▶ グラニューラを鳴らす";
+        btn.classList.remove("playing");
+      }
+    }
+
+    function sendGranularParam(param, rawValue, displayId) {
+      const value = parseFloat(rawValue);
+      const display = document.getElementById(displayId);
+      if (param === "size") {
+        display.textContent = value.toFixed(2) + " s";
+      } else if (param === "density") {
+        display.textContent = Math.round(value);
+      } else {
+        display.textContent = value.toFixed(2);
+      }
+      send({ address: "/matoma/granular/param", args: [param, value] });
+    }
+
+    function setTrigMode(mode) {
+      // ボタンのアクティブ状態を切り替える
+      document.getElementById("trig-dust").classList.toggle("active", mode === 0);
+      document.getElementById("trig-impulse").classList.toggle("active", mode === 1);
+      // SC へ trig_mode を送信（0=Dust, 1=Impulse）
+      send({ address: "/matoma/granular/param", args: ["trig_mode", mode] });
+      addLog("/matoma/granular/param", ["trig_mode", mode]);
+    }
+
+    function setStatus(text, ok) {
+      const el = document.getElementById("status");
+      el.textContent = text;
+      el.className = ok ? "connected" : "";
+    }
+
+    function addLog(address, args) {
+      const log = document.getElementById("log");
+      const entry = document.createElement("div");
+      entry.className = "log-entry";
+      const now = new Date().toLocaleTimeString("ja-JP");
+      entry.innerHTML =
+        `<span class="time">${now}</span>` +
+        `<span class="addr">${address}</span>  ` +
+        `<span class="args">${JSON.stringify(args)}</span>`;
+      log.appendChild(entry);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    // ── 自律モード ──────────────────────────────────────────────────
+
+    // autonomous_update でスライダーを更新するためのマッピング
+    const AUTO_PARAM_MAP = {
+      freq:         { slider: "freq",        display: "freq-val",        fmt: v => Math.round(v) + " Hz" },
+      cutoff:       { slider: "cutoff",      display: "cutoff-val",      fmt: v => Math.round(v) + " Hz" },
+      drone_freq:   { slider: "drone-freq",  display: "drone-freq-val",  fmt: v => Math.round(v) + " Hz" },
+      drone_detune: { slider: "drone-detune",display: "drone-detune-val",fmt: v => v.toFixed(2) },
+      drone_cutoff: { slider: "drone-cutoff",display: "drone-cutoff-val",fmt: v => Math.round(v) + " Hz" },
+      drone_drift:  { slider: "drone-drift", display: "drone-drift-val", fmt: v => v.toFixed(2) },
+      drone_room:   { slider: "drone-room",  display: "drone-room-val",  fmt: v => v.toFixed(2) },
+    };
+
+    function applyAutoUpdate(params) {
+      // SC へは bridge 側が送っているので、ここではスライダー表示だけ更新する
+      for (const [key, val] of Object.entries(params)) {
+        const cfg = AUTO_PARAM_MAP[key];
+        if (!cfg) continue;
+        const slider  = document.getElementById(cfg.slider);
+        const display = document.getElementById(cfg.display);
+        if (slider)  slider.value = val;
+        if (display) display.textContent = cfg.fmt(val);
+      }
+    }
+
+    function setAutoRunning(on) {
+      send({ address: on ? "/matoma/autonomous/start" : "/matoma/autonomous/stop", args: [] });
+      document.getElementById("auto-off-btn").className =
+        "auto-toggle" + (on ? "" : " active-off");
+      document.getElementById("auto-on-btn").className =
+        "auto-toggle" + (on ? " active-on" : "");
+      addLog("/matoma/autonomous/" + (on ? "start" : "stop"), []);
+    }
+
+    function setAutoMode(mode) {
+      send({ address: "/matoma/autonomous/mode", args: [mode] });
+      document.getElementById("auto-random").classList.toggle("active", mode === "random");
+      document.getElementById("auto-directed").classList.toggle("active", mode === "directed");
+      document.getElementById("auto-targets").style.display =
+        mode === "directed" ? "block" : "none";
+      addLog("/matoma/autonomous/mode", [mode]);
+    }
+
+    function setAutoSpeed(rawValue) {
+      const value = parseFloat(rawValue);
+      document.getElementById("auto-speed-val").textContent = value.toFixed(2);
+      send({ address: "/matoma/autonomous/speed", args: [value] });
+    }
+
+    function setTidalAuto(on) {
+      send({ address: "/matoma/autonomous/tidal_auto", args: [on ? 1 : 0] });
+      document.getElementById("tidal-auto-off-btn").className =
+        "auto-toggle" + (on ? "" : " active-off");
+      document.getElementById("tidal-auto-on-btn").className =
+        "auto-toggle" + (on ? " active-on" : "");
+      if (!on) {
+        document.getElementById("tidal-auto-indicator").textContent = "— 待機中 —";
+        document.getElementById("tidal-auto-indicator").style.color = "#555";
+      }
+    }
+
+    function setProgression(name) {
+      send({ address: "/matoma/autonomous/progression", args: [name] });
+      addLog("/matoma/autonomous/progression", [name]);
+    }
+
+    function onTidalAutoStep(msg) {
+      const indicator = document.getElementById("tidal-auto-indicator");
+      indicator.textContent = `♩ ${msg.root} ${msg.chord}  [step ${msg.step + 1}]`;
+      indicator.style.color = "#7fff7f";
+    }
+
+    function setAutoTarget(param, rawValue, displayId, unit, isInt) {
+      const value = parseFloat(rawValue);
+      document.getElementById(displayId).textContent =
+        isInt ? Math.round(value) + unit : value.toFixed(2) + unit;
+      send({ address: "/matoma/autonomous/target", args: [param, value] });
+    }
+
+    // ── Tidal Cycles ──────────────────────────────────────────────────
+
+    let tidalRunning = false;
+    let tidalRoot = "C";
+
+    function tidalStart() {
+      send({ address: "/matoma/tidal/start", args: [] });
+      addLog("/matoma/tidal/start", []);
+    }
+
+    function tidalHush() {
+      send({ address: "/matoma/tidal/hush", args: [] });
+      addLog("tidal", ["hush"]);
+      showTidalCode("hush");
+      document.getElementById("tidal-chord-btn").classList.remove("active");
+      document.getElementById("tidal-scale-btn").classList.remove("active");
+    }
+
+    function onTidalStarted(msg) {
+      tidalRunning = true;
+      const btn = document.getElementById("tidal-start-btn");
+      btn.textContent = "✓ TIDAL 起動中";
+      btn.classList.add("running");
+      addLog("tidal", [msg.message]);
+    }
+
+    function onTidalStopped() {
+      tidalRunning = false;
+      const btn = document.getElementById("tidal-start-btn");
+      btn.textContent = "▶ TIDAL START";
+      btn.classList.remove("running");
+    }
+
+    function updateBpmDisplay(val) {
+      document.getElementById("tidal-bpm-val").textContent = Math.round(val);
+    }
+
+    function applyTempo() {
+      const bpm = parseFloat(document.getElementById("tidal-bpm").value);
+      send({ address: "/matoma/tidal/tempo", args: [bpm] });
+      addLog("tidal/tempo", [bpm + " BPM"]);
+    }
+
+    function selectRoot(root) {
+      tidalRoot = root;
+      document.querySelectorAll(".root-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.textContent === root);
+      });
+    }
+
+    function playChord() {
+      const synth  = document.getElementById("tidal-synth").value;
+      const chord  = document.getElementById("tidal-chord").value;
+      const octave = parseInt(document.getElementById("tidal-octave").value);
+      const amp    = parseFloat(document.getElementById("tidal-amp").value);
+      send({
+        address: "/matoma/tidal/chord",
+        args: [tidalRoot, chord, synth, 1, octave, amp],
+      });
+      document.getElementById("tidal-chord-btn").classList.add("active");
+      addLog("tidal/chord", [tidalRoot, chord]);
+    }
+
+    function playScale() {
+      const synth  = document.getElementById("tidal-synth").value;
+      const scale  = document.getElementById("tidal-scale").value;
+      const octave = parseInt(document.getElementById("tidal-octave").value);
+      const amp    = parseFloat(document.getElementById("tidal-amp").value);
+      send({
+        address: "/matoma/tidal/scale",
+        args: [tidalRoot, scale, synth, 2, octave, amp],
+      });
+      document.getElementById("tidal-scale-btn").classList.add("active");
+      addLog("tidal/scale", [tidalRoot, scale]);
+    }
+
+    function showTidalCode(code) {
+      document.getElementById("tidal-code-preview").textContent = code || "";
+    }
+
+    connect();
+  </script>
+</body>
+</html>

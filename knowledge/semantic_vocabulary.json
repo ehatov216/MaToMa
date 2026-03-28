@@ -1,0 +1,71 @@
+{
+  "version": "1.0",
+  "descriptors": {
+    "dark": {
+      "descriptor": "dark",
+      "human_terms": ["暗く", "もっと暗く", "darker", "dark", "duller", "暗い"],
+      "audio_features_delta": {"brightness": -0.4},
+      "synthesis_params_delta": {"filter_cutoff": -500.0}
+    },
+    "bright": {
+      "descriptor": "bright",
+      "human_terms": ["明るく", "もっと明るく", "brighter", "bright", "crisp", "明るい"],
+      "audio_features_delta": {"brightness": 0.4},
+      "synthesis_params_delta": {"filter_cutoff": 500.0}
+    },
+    "warm": {
+      "descriptor": "warm",
+      "human_terms": ["暖かく", "温かみ", "warmer", "warm", "cozy", "温かい"],
+      "audio_features_delta": {"warmth": 0.3},
+      "synthesis_params_delta": {"filter_cutoff": -300.0}
+    },
+    "cold": {
+      "descriptor": "cold",
+      "human_terms": ["冷たく", "冷たい", "colder", "cold", "icy"],
+      "audio_features_delta": {"warmth": -0.3},
+      "synthesis_params_delta": {"filter_cutoff": 300.0}
+    },
+    "rough": {
+      "descriptor": "rough",
+      "human_terms": ["ざらっとした", "ざらざら", "rougher", "rough", "gritty", "harsh"],
+      "audio_features_delta": {"roughness": 0.4},
+      "synthesis_params_delta": {"noise_amount": 0.15}
+    },
+    "smooth": {
+      "descriptor": "smooth",
+      "human_terms": ["滑らかに", "滑らか", "smoother", "smooth", "silky", "clean"],
+      "audio_features_delta": {"roughness": -0.4},
+      "synthesis_params_delta": {"noise_amount": -0.1}
+    },
+    "alive": {
+      "descriptor": "alive",
+      "human_terms": ["動きが欲しい", "動き", "livelier", "alive", "moving", "animated"],
+      "audio_features_delta": {"modulation": 0.3},
+      "synthesis_params_delta": {"lfo_rate": 1.5, "lfo_depth": 0.2}
+    },
+    "static": {
+      "descriptor": "static",
+      "human_terms": ["静的に", "静かに", "more static", "still", "less movement"],
+      "audio_features_delta": {"modulation": -0.3},
+      "synthesis_params_delta": {"lfo_rate": -1.0, "lfo_depth": -0.1}
+    },
+    "wide": {
+      "descriptor": "wide",
+      "human_terms": ["広がりが欲しい", "広く", "wider", "wide", "spacious", "spread"],
+      "audio_features_delta": {"width": 0.3},
+      "synthesis_params_delta": {"reverb_mix": 0.2, "pan_spread": 0.2}
+    },
+    "narrow": {
+      "descriptor": "narrow",
+      "human_terms": ["狭く", "モノに", "narrower", "narrow", "mono", "tight"],
+      "audio_features_delta": {"width": -0.3},
+      "synthesis_params_delta": {"reverb_mix": -0.1, "pan_spread": -0.2}
+    },
+    "punchy": {
+      "descriptor": "punchy",
+      "human_terms": ["パンチのある", "もっとパンチ", "punchier", "punchy", "snappy", "transient"],
+      "audio_features_delta": {"punch": 0.4},
+      "synthesis_params_delta": {"attack_ms": -10.0, "transient_boost": 0.3}
+    }
+  }
+}
