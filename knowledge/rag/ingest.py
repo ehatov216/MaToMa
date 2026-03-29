@@ -1,5 +1,6 @@
 import contextlib
 import glob
+import hashlib
 import os
 import re
 from pathlib import Path
@@ -14,14 +15,19 @@ from knowledge.rag import KnowledgeChunk
 
 # パス設定
 BASE_DIR = Path(__file__).parent
-DOCS_DIR = BASE_DIR / "documents"  # gitignore済み (SC公式ドキュメント変換キャッシュ)
-SOURCES_DIR = BASE_DIR / "sources"  # Git管理済み (キュレーション済み合成ナレッジ)
+DOCS_DIR = BASE_DIR / "documents"  # gitignore済み
+SOURCES_DIR = BASE_DIR / "sources"  # Git管理済み
 DB_DIR = BASE_DIR / "chroma_db"
 COLLECTION_NAME = "sonic_anatomy_knowledge"
 
 # モデル設定 (Apple Silicon対応の軽量モデル)
-# sentence-transformers は自動でMPSを使える場合は使います
 MODEL_NAME = "all-MiniLM-L6-v2"
+
+
+def _chunk_id(filename: str, counter: int, content: str) -> str:
+    """ファイル名・連番・コンテンツハッシュを組み合わせた一意IDを返す。"""
+    content_hash = hashlib.sha256(content.encode()).hexdigest()[:8]
+    return f"{filename}_{counter:03d}_{content_hash}"
 
 
 def parse_markdown(filepath: str) -> tuple[dict[str, Any], str]:
@@ -42,16 +48,17 @@ def parse_markdown(filepath: str) -> tuple[dict[str, Any], str]:
     return {}, content
 
 
-def chunk_text(text: str, source_file: str, max_length: int = 1000) -> list[KnowledgeChunk]:
+def chunk_text(
+    text: str, source_file: str, max_length: int = 1000
+) -> list[KnowledgeChunk]:
     """テキストを段落や見出し単位で分割する簡易チャンカー"""
     chunks = []
-    # 簡単のため、ダブル改行(段落)で分割
     paragraphs = re.split(r"\n\n+", text)
 
     current_chunk = ""
     current_section = "General"
     chunk_id_counter = 0
-    filename = Path(source_file).name
+    filename = Path(source_file).stem
 
     for para in paragraphs:
         para_stripped = para.strip()
@@ -63,11 +70,16 @@ def chunk_text(text: str, source_file: str, max_length: int = 1000) -> list[Know
         if header_match:
             current_section = header_match.group(2).strip()
 
-        if len(current_chunk) + len(para_stripped) > max_length and current_chunk:
+        over_limit = (
+            len(current_chunk) + len(para_stripped) > max_length
+            and current_chunk
+        )
+        if over_limit:
+            stripped = current_chunk.strip()
             chunks.append(
                 KnowledgeChunk(
-                    id=f"{filename}_{chunk_id_counter}",
-                    content=current_chunk.strip(),
+                    id=_chunk_id(filename, chunk_id_counter, stripped),
+                    content=stripped,
                     source_file=source_file,
                     section=current_section,
                     category="sc_tc",
@@ -79,10 +91,11 @@ def chunk_text(text: str, source_file: str, max_length: int = 1000) -> list[Know
             current_chunk += para + "\n\n"
 
     if current_chunk.strip():
+        stripped = current_chunk.strip()
         chunks.append(
             KnowledgeChunk(
-                id=f"{filename}_{chunk_id_counter}",
-                content=current_chunk.strip(),
+                id=_chunk_id(filename, chunk_id_counter, stripped),
+                content=stripped,
                 source_file=source_file,
                 section=current_section,
                 category="sc_tc",
@@ -107,25 +120,34 @@ def ingest_documents() -> None:
 
     # 両ディレクトリからMarkdownを収集
     md_files = glob.glob(str(DOCS_DIR / "*.md"))
-    source_files = glob.glob(str(SOURCES_DIR / "*.md")) if SOURCES_DIR.exists() else []
+    source_files = (
+        glob.glob(str(SOURCES_DIR / "*.md")) if SOURCES_DIR.exists() else []
+    )
 
     if not md_files and not source_files:
         logger.warning("Markdownファイルが見つかりません。")
         return
 
     logger.info(
-        f"{len(md_files)} 件 (documents/) + {len(source_files)} 件 (sources/) を処理します..."
+        f"{len(md_files)} 件 (documents/)"
+        f" + {len(source_files)} 件 (sources/) を処理します..."
     )
 
-    # チャンク化
-    all_chunks = []
+    # チャンク化（categoryはmetadataから取得し、新インスタンスで設定）
+    all_chunks: list[KnowledgeChunk] = []
     for filepath in md_files + source_files:
         metadata, body = parse_markdown(filepath)
-        chunks = chunk_text(body, filepath)
-        # categoryをmetadataから取得できれば上書き
-        for c in chunks:
-            c.category = metadata.get("category", c.category)
-        all_chunks.extend(chunks)
+        category = metadata.get("category", "sc_tc")
+        for c in chunk_text(body, filepath):
+            all_chunks.append(
+                KnowledgeChunk(
+                    id=c.id,
+                    content=c.content,
+                    source_file=c.source_file,
+                    section=c.section,
+                    category=category,
+                )
+            )
 
     logger.info(f"合計 {len(all_chunks)} 個のチャンクが生成されました。")
 
@@ -144,8 +166,9 @@ def ingest_documents() -> None:
 
     # バッチ処理でインデックス化
     batch_size = 100
-    for i in range(0, len(all_chunks), batch_size):
-        batch = all_chunks[i : i + batch_size]
+    total = len(all_chunks)
+    for i in range(0, total, batch_size):
+        batch = all_chunks[i:i + batch_size]
 
         ids = [c.id for c in batch]
         documents = [c.content for c in batch]
@@ -158,14 +181,15 @@ def ingest_documents() -> None:
             for c in batch
         ]
 
-        # 埋め込みベクトルの計算
         embeddings = model.encode(documents).tolist()
-
-        # 追加
-        collection.add(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)  # type: ignore[arg-type]
-        logger.debug(
-            f"インデックス進捗: {min(i+batch_size, len(all_chunks))}/{len(all_chunks)} チャンク完了"
+        collection.add(  # type: ignore[arg-type]
+            ids=ids,
+            embeddings=embeddings,
+            documents=documents,
+            metadatas=metadatas,
         )
+        done = min(i + batch_size, total)
+        logger.debug(f"インデックス進捗: {done}/{total} チャンク完了")
 
     logger.success("インデックス化が完了しました!")
 

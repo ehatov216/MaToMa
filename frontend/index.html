@@ -11,6 +11,7 @@
   --c-scene:#4ade80;--c-drone:#60a5fa;--c-gran:#fb923c;
   --c-rhythmic:#f43f5e;--c-effect:#e879f9;--c-chaos:#a78bfa;
   --c-auto:#a78bfa;--c-warn:#fbbf24;
+  --c-dronegen:#38bdf8;
 }
 body{background:var(--bg);color:var(--text);font-family:'SF Mono','Fira Code',monospace;font-size:12px;min-height:100vh}
 
@@ -180,6 +181,28 @@ input[type=range].perc-mini-slider::-webkit-slider-thumb{-webkit-appearance:none
 .perc-chaos-val{font-size:.6rem;color:var(--c-drums);min-width:45px;text-align:right;font-variant-numeric:tabular-nums}
 .perc-rev-btn{padding:.12rem .35rem;font-size:.58rem;border:1px solid var(--border);background:transparent;color:var(--dim);border-radius:2px;cursor:pointer;font-family:inherit}
 .perc-rev-btn.on{border-color:var(--c-drums);color:var(--c-drums);background:#1a0410}
+
+/* DRONE GENERATORS */
+#dronegen-layer{border-color:#0a2030}
+#dronegen-layer .mhdr{border-bottom-color:#0a2030;background:rgba(56,189,248,.03)}
+.dg-grid{display:flex;flex-direction:column;gap:.28rem}
+.dg-row{display:grid;grid-template-columns:44px 24px 24px 1fr 1fr 1fr;align-items:center;gap:.3rem;padding:.1rem 0}
+.dg-row + .dg-row{border-top:1px solid var(--border)}
+.dg-type-label{font-size:.62rem;font-weight:bold;letter-spacing:.06em;color:var(--c-dronegen);text-align:right;padding-right:.2rem}
+.dg-btn{padding:.15rem .22rem;font-family:inherit;font-size:.63rem;border-radius:2px;
+  border:1px solid var(--border);background:transparent;color:var(--dim);
+  cursor:pointer;min-height:22px;text-align:center;line-height:1}
+.dg-btn:hover{background:var(--bg3);color:var(--text)}
+.dg-btn.start-on{border-color:var(--c-dronegen);color:var(--c-dronegen);background:#04141e}
+.dg-stop-btn{border-color:#7f3333;color:#f87171}
+.dg-param{display:grid;grid-template-columns:28px 1fr 36px;align-items:center;gap:.18rem}
+.dg-label{font-size:.56rem;color:var(--dim);text-align:right;white-space:nowrap}
+input[type=range].dg-slider{width:100%;height:2px;cursor:pointer;-webkit-appearance:none;
+  appearance:none;background:var(--border);border-radius:2px;outline:none}
+input[type=range].dg-slider::-webkit-slider-thumb{-webkit-appearance:none;width:8px;height:8px;
+  border-radius:50%;background:var(--c-dronegen);cursor:pointer}
+.dg-val{font-size:.57rem;color:var(--c-warn);text-align:right;white-space:nowrap;
+  font-variant-numeric:tabular-nums}
 
 /* LOG */
 #log-panel{background:var(--bg2);border:1px solid var(--border);border-radius:4px;overflow:hidden}
@@ -456,6 +479,149 @@ input[type=range].perc-mini-slider::-webkit-slider-thumb{-webkit-appearance:none
       </div>
 
     </div><!-- SPACE層グリッド end -->
+
+    <!-- DRONE GENERATORS (5種) -->
+    <div class="mod" id="dronegen-layer">
+      <div class="mhdr">
+        <div class="mbar" style="background:var(--c-dronegen)"></div>
+        <div class="mname" style="color:var(--c-dronegen)">DRONE GEN</div>
+        <span style="font-size:.57rem;color:rgba(56,189,248,.4);margin-left:.2rem">5種 — 同時複数起動可</span>
+        <button class="tb" style="margin-left:auto;padding:.18rem .5rem;font-size:.6rem;min-height:22px;border-color:#7f3333;color:#f87171" onclick="dgStopAll()">■ ALL</button>
+      </div>
+      <div class="mbody">
+        <div class="dg-grid">
+
+          <!-- 1. FM + グリッサンド (a_loss_of_self) -->
+          <div class="dg-row">
+            <span class="dg-type-label">FM</span>
+            <button class="dg-btn" id="dgbtn-fm-start" onclick="dgStart('fm')" title="FM+グリッサンド開始">▶</button>
+            <button class="dg-btn dg-stop-btn" onclick="dgStop('fm')" title="停止">■</button>
+            <div class="dg-param">
+              <span class="dg-label">freq</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.25" step="0.01"
+                     oninput="dgSend('fm','freq_norm',this.value,'dgv-fm-freq',v=>Math.round(20*Math.pow(15,v))+'Hz')">
+              <span class="dg-val" id="dgv-fm-freq">39Hz</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">mod</span>
+              <input type="range" class="dg-slider" min="0" max="6" value="2" step="0.1"
+                     oninput="dgSend('fm','mod_index',this.value,'dgv-fm-mod',v=>v.toFixed(1))">
+              <span class="dg-val" id="dgv-fm-mod">2.0</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">amp</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.30" step="0.01"
+                     oninput="dgSend('fm','amp',this.value,'dgv-fm-amp',v=>v.toFixed(2))">
+              <span class="dg-val" id="dgv-fm-amp">.30</span>
+            </div>
+          </div>
+
+          <!-- 2. 多声バンドパスノイズ (DroneCollider) -->
+          <div class="dg-row">
+            <span class="dg-type-label">NOISE</span>
+            <button class="dg-btn" id="dgbtn-noise-start" onclick="dgStart('noise')" title="多声バンドパスノイズ開始">▶</button>
+            <button class="dg-btn dg-stop-btn" onclick="dgStop('noise')" title="停止">■</button>
+            <div class="dg-param">
+              <span class="dg-label">freq</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.25" step="0.01"
+                     oninput="dgSend('noise','freq_norm',this.value,'dgv-noise-freq',v=>Math.round(20*Math.pow(15,v))+'Hz')">
+              <span class="dg-val" id="dgv-noise-freq">39Hz</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">damp</span>
+              <input type="range" class="dg-slider" min="0.5" max="2.0" value="1.2" step="0.05"
+                     oninput="dgSend('noise','damp_exp',this.value,'dgv-noise-damp',v=>v.toFixed(2))">
+              <span class="dg-val" id="dgv-noise-damp">1.20</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">amp</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.28" step="0.01"
+                     oninput="dgSend('noise','amp',this.value,'dgv-noise-amp',v=>v.toFixed(2))">
+              <span class="dg-val" id="dgv-noise-amp">.28</span>
+            </div>
+          </div>
+
+          <!-- 3. ウェーブテーブル+デグレード (SCgazer) -->
+          <div class="dg-row">
+            <span class="dg-type-label">WT</span>
+            <button class="dg-btn" id="dgbtn-wavetable-start" onclick="dgStart('wavetable')" title="ウェーブテーブル+デグレード開始">▶</button>
+            <button class="dg-btn dg-stop-btn" onclick="dgStop('wavetable')" title="停止">■</button>
+            <div class="dg-param">
+              <span class="dg-label">freq</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.25" step="0.01"
+                     oninput="dgSend('wavetable','freq_norm',this.value,'dgv-wt-freq',v=>Math.round(20*Math.pow(15,v))+'Hz')">
+              <span class="dg-val" id="dgv-wt-freq">39Hz</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">dg▲</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0" step="0.01"
+                     oninput="dgSend('wavetable','degrade',this.value,'dgv-wt-dg',v=>v.toFixed(2))"
+                     title="degrade: 0=原音 1=グリッチ">
+              <span class="dg-val" id="dgv-wt-dg">.00</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">amp</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.30" step="0.01"
+                     oninput="dgSend('wavetable','amp',this.value,'dgv-wt-amp',v=>v.toFixed(2))">
+              <span class="dg-val" id="dgv-wt-amp">.30</span>
+            </div>
+          </div>
+
+          <!-- 4. フィードバックネットワーク (rumush) -->
+          <div class="dg-row">
+            <span class="dg-type-label">FB</span>
+            <button class="dg-btn" id="dgbtn-feedback-start" onclick="dgStart('feedback')" title="フィードバックネットワーク開始">▶</button>
+            <button class="dg-btn dg-stop-btn" onclick="dgStop('feedback')" title="停止">■</button>
+            <div class="dg-param">
+              <span class="dg-label">freq</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.25" step="0.01"
+                     oninput="dgSend('feedback','freq_norm',this.value,'dgv-fb-freq',v=>Math.round(20*Math.pow(15,v))+'Hz')">
+              <span class="dg-val" id="dgv-fb-freq">39Hz</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">fback</span>
+              <input type="range" class="dg-slider" min="0" max="0.85" value="0.6" step="0.01"
+                     oninput="dgSend('feedback','feedback',this.value,'dgv-fb-fback',v=>v.toFixed(2))"
+                     title="feedback: 0.7超で自己発振気味">
+              <span class="dg-val" id="dgv-fb-fback">.60</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">amp</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.25" step="0.01"
+                     oninput="dgSend('feedback','amp',this.value,'dgv-fb-amp',v=>v.toFixed(2))">
+              <span class="dg-val" id="dgv-fb-amp">.25</span>
+            </div>
+          </div>
+
+          <!-- 5. 揺れるSinOsc雲 (Meandering Sines) -->
+          <div class="dg-row">
+            <span class="dg-type-label">SINES</span>
+            <button class="dg-btn" id="dgbtn-sines-start" onclick="dgStart('sines')" title="揺れるSinOsc雲開始">▶</button>
+            <button class="dg-btn dg-stop-btn" onclick="dgStop('sines')" title="停止">■</button>
+            <div class="dg-param">
+              <span class="dg-label">freq</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.25" step="0.01"
+                     oninput="dgSend('sines','freq_norm',this.value,'dgv-sn-freq',v=>Math.round(20*Math.pow(15,v))+'Hz')">
+              <span class="dg-val" id="dgv-sn-freq">39Hz</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">chord</span>
+              <input type="range" class="dg-slider" min="0" max="3" value="0" step="1"
+                     oninput="dgSend('sines','chord_type',this.value,'dgv-sn-chord',v=>['5th','maj6','min6','maj7'][Math.round(v)])"
+                     title="chord_type: 0=5th 1=maj6 2=min6 3=maj7">
+              <span class="dg-val" id="dgv-sn-chord">5th</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">amp</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.28" step="0.01"
+                     oninput="dgSend('sines','amp',this.value,'dgv-sn-amp',v=>v.toFixed(2))">
+              <span class="dg-val" id="dgv-sn-amp">.28</span>
+            </div>
+          </div>
+
+        </div><!-- .dg-grid -->
+      </div>
+    </div><!-- DRONE GEN end -->
 
     <!-- EVENT層: RHYTHMIC -->
     <div class="mod" style="--thumb:var(--c-rhythmic)">
@@ -746,7 +912,10 @@ function connect() {
     setDot('ws', 'off');
     scheduleReconnect();
   };
-  ws.onerror = () => {};
+  ws.onerror = (e) => {
+    setDot('ws', 'err');
+    addLog('ws_err', '接続エラー');
+  };
   ws.onmessage = (e) => {
     let m;
     try { m = JSON.parse(e.data); } catch { return; }
@@ -803,6 +972,7 @@ function handleMessage(m) {
     }
   } else if (m.address === '/matoma/perc/pattern') {
     // ユークリッド/ランダム生成後にSCがパターンを返す
+    if (!Array.isArray(m.args) || m.args.length < 17) return;
     const track = m.args[0];
     const steps = m.args.slice(1); // 16個の値
     if (track >= 0 && track < 4) {
@@ -966,9 +1136,9 @@ function updateDeviceSelect(current, devices) {
 
   // 入力専用デバイス（マイク等）は除外。出力デバイス名のキーワードで判断
   const OUTPUT_KEYWORDS = ['スピーカー', 'ス', 'Speaker', 'Output', 'Aggregate', 'Audio', 'Zoom'];
-  const INPUT_ONLY = ['MacBook Proの'];  // マイクのみのデバイスを除外
+  const INPUT_ONLY_PREFIXES = ['MacBook Proの'];  // マイクのみのデバイスを除外
   devices.forEach(dev => {
-    if (INPUT_ONLY.includes(dev)) return;  // 入力専用をスキップ
+    if (INPUT_ONLY_PREFIXES.some(p => dev.startsWith(p))) return;  // 入力専用をスキップ
     const opt = document.createElement('option');
     opt.value = dev;
     opt.textContent = dev.length > 28 ? dev.slice(0, 26) + '…' : dev;
@@ -1002,6 +1172,12 @@ function testTone() {
 
 function stopAll() {
   send({ address: '/matoma/all/stop', args: [] });
+  // DroneGen ボタンの表示もリセット
+  ['fm', 'noise', 'wavetable', 'feedback', 'sines'].forEach(type => {
+    dgActive.delete(type);
+    const btn = document.getElementById(`dgbtn-${type}-start`);
+    if (btn) btn.classList.remove('start-on');
+  });
   addLog('STOP', '全停止');
 }
 
@@ -1541,6 +1717,43 @@ function percFilterChange() {
   if (vc) vc.textContent = Math.round(cutoff);
   if (vr) vr.textContent = res.toFixed(2);
   send({ address: '/matoma/perc/filter', args: [cutoff, res] });
+}
+
+// ── DRONE GENERATORS ─────────────────────────────────────────
+// 起動中のドローンタイプを管理するSet
+const dgActive = new Set();
+
+function dgStart(type) {
+  send({ address: `/matoma/drone/${type}/start`, args: [] });
+  dgActive.add(type);
+  const btn = document.getElementById(`dgbtn-${type}-start`);
+  if (btn) btn.classList.add('start-on');
+  addLog(`/drone/${type}`, 'START');
+}
+
+function dgStop(type) {
+  send({ address: `/matoma/drone/${type}/stop`, args: [] });
+  dgActive.delete(type);
+  const btn = document.getElementById(`dgbtn-${type}-start`);
+  if (btn) btn.classList.remove('start-on');
+  addLog(`/drone/${type}`, 'STOP');
+}
+
+function dgSend(type, param, rawVal, vidId, fmt) {
+  const v = parseFloat(rawVal);
+  const el = document.getElementById(vidId);
+  if (el) el.textContent = fmt(v);
+  send({ address: `/matoma/drone/${type}/param`, args: [param, v] });
+}
+
+function dgStopAll() {
+  send({ address: '/matoma/drone/all/stop', args: [] });
+  ['fm', 'noise', 'wavetable', 'feedback', 'sines'].forEach(type => {
+    dgActive.delete(type);
+    const btn = document.getElementById(`dgbtn-${type}-start`);
+    if (btn) btn.classList.remove('start-on');
+  });
+  addLog('/drone', 'ALL STOP');
 }
 
 // ── INIT ──────────────────────────────────────────────────

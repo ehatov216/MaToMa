@@ -10,15 +10,25 @@ scenes.json を編集することでClaudeがセッション間にシーンを�
 """
 
 import json
+import logging
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 SCENES_FILE = Path(__file__).parent / "scenes.json"
 
 
 def load_scenes() -> list[dict]:
     """scenes.json からシーン一覧を読み込む。"""
-    with open(SCENES_FILE, encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(SCENES_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        log.error(f"scenes.json が見つかりません: {SCENES_FILE}")
+        return []
+    except json.JSONDecodeError as e:
+        log.error(f"scenes.json のパースに失敗しました: {e}")
+        return []
 
 
 def get_scene(name: str) -> dict | None:

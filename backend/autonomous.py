@@ -54,8 +54,30 @@ class _ParamState:
     osc_arg: str
     min_val: float
     max_val: float
-    value: float    # 現在値（自律ループが毎ステップ書き換える）
+    value: float    # 現在値
     target: float   # directed モード用の目標値
+
+    def with_value(self, new_value: float) -> "_ParamState":
+        """valueだけ変えた新インスタンスを返す（イミュータブル更新）。"""
+        return _ParamState(
+            osc_address=self.osc_address,
+            osc_arg=self.osc_arg,
+            min_val=self.min_val,
+            max_val=self.max_val,
+            value=new_value,
+            target=self.target,
+        )
+
+    def with_target(self, new_target: float) -> "_ParamState":
+        """targetだけ変えた新インスタンスを返す（イミュータブル更新）。"""
+        return _ParamState(
+            osc_address=self.osc_address,
+            osc_arg=self.osc_arg,
+            min_val=self.min_val,
+            max_val=self.max_val,
+            value=self.value,
+            target=new_target,
+        )
 
 
 class AutonomousMode:
@@ -144,7 +166,8 @@ class AutonomousMode:
         """directed モード用の目標値を設定する。"""
         if param in self._params:
             p = self._params[param]
-            p.target = max(p.min_val, min(p.max_val, float(value)))
+            clamped = max(p.min_val, min(p.max_val, float(value)))
+            self._params[param] = p.with_target(clamped)
 
     def set_tidal(self, tidal: "TidalController") -> None:
         """TidalControllerへの参照を渡す（bridge.py 起動時に呼ぶ）。"""
@@ -179,7 +202,8 @@ class AutonomousMode:
         """
         if param in self._params:
             p = self._params[param]
-            p.value = max(p.min_val, min(p.max_val, float(value)))
+            clamped = max(p.min_val, min(p.max_val, float(value)))
+            self._params[param] = p.with_value(clamped)
 
     def start(self) -> None:
         if not self._running:
@@ -212,7 +236,7 @@ class AutonomousMode:
                 continue
 
             new_val = self._next_value(p, key)
-            p.value = new_val
+            self._params[key] = p.with_value(new_val)
             updates[key] = new_val
             self._send_osc(p.osc_address, [p.osc_arg, new_val])
 
@@ -246,12 +270,16 @@ class AutonomousMode:
         amp = float(self._tidal.state.get("amp", 0.5))
 
         # コードを鳴らす（d1）
-        chord_code = make_chord_pattern(1, synth, root, chord, octave, amp * 0.8)
+        chord_code = make_chord_pattern(
+            1, synth, root, chord, octave, amp * 0.8
+        )
         self._tidal.evaluate(chord_code)
 
         # アルペジオ（d2）: randomモードならリズムも変える
         if self._mode == "random":
-            self._arp_rhythm_index = random.randrange(len(ARP_RHYTHMS))  # noqa: S311
+            self._arp_rhythm_index = random.randrange(  # noqa: S311
+                len(ARP_RHYTHMS)
+            )
         degrees = ARP_RHYTHMS[self._arp_rhythm_index]
         scale = self._tidal.state.get("scale", "minor")
         arp_code = make_scale_pattern(
@@ -371,7 +399,8 @@ class _ChaosParam:
 
 # パラメーターのデフォルト定義
 # 構造: {layer: {param: (init_value, attractor, range, speed)}}
-_DEFAULT_CHAOS_PARAMS: dict[str, dict[str, tuple[float, float, float, float]]] = {
+_LayerParams = dict[str, tuple[float, float, float, float]]
+_DEFAULT_CHAOS_PARAMS: dict[str, _LayerParams] = {
     "drone": {
         # (init, attractor, range, speed)
         # speed × range = 1ステップあたりの最大変化量（0.1秒ごと）
@@ -415,9 +444,9 @@ class ChaosEngine:
         engine.set_scene("浮遊")  # シーン変更
     """
 
-    HISTORY_LEN = 8       # 各パラメーターが記憶する世代数
-    DEJAVU_PROB = 0.3     # 過去に戻る確率
-    UPDATE_INTERVAL = 0.1 # 更新間隔（秒）
+    HISTORY_LEN = 8        # 各パラメーターが記憶する世代数
+    DEJAVU_PROB = 0.3      # 過去に戻る確率
+    UPDATE_INTERVAL = 0.1  # 更新間隔（秒）
 
     def __init__(
         self,
@@ -497,10 +526,13 @@ class ChaosEngine:
         self._params["drone"] = self._apply_scene_layer(
             self._params["drone"],
             {
-                "freq":         (drone.get("freq_attractor"),     drone.get("freq_range")),
+                "freq": (
+                    drone.get("freq_attractor"),
+                    drone.get("freq_range"),
+                ),
                 "feedback_amt": (drone.get("feedback_attractor"), None),
-                "shimmer":      (drone.get("shimmer_attractor"),  None),
-                "room":         (drone.get("room_attractor"),     None),
+                "shimmer": (drone.get("shimmer_attractor"), None),
+                "room": (drone.get("room_attractor"), None),
             },
         )
 
@@ -508,9 +540,12 @@ class ChaosEngine:
         self._params["granular"] = self._apply_scene_layer(
             self._params["granular"],
             {
-                "density": (granular.get("density_attractor"), granular.get("density_range")),
-                "spray":   (granular.get("spray_attractor"),   None),
-                "room":    (granular.get("room_attractor"),    None),
+                "density": (
+                    granular.get("density_attractor"),
+                    granular.get("density_range"),
+                ),
+                "spray": (granular.get("spray_attractor"), None),
+                "room": (granular.get("room_attractor"), None),
             },
         )
 
@@ -518,7 +553,10 @@ class ChaosEngine:
         self._params["rhythmic"] = self._apply_scene_layer(
             self._params["rhythmic"],
             {
-                "prob": (rhythmic.get("prob_attractor"), rhythmic.get("prob_range")),
+                "prob": (
+                    rhythmic.get("prob_attractor"),
+                    rhythmic.get("prob_range"),
+                ),
             },
         )
 
@@ -575,7 +613,9 @@ class ChaosEngine:
         # Bounded Random Walk: 引力点方向への引力 + ランダム摂動
         # 引力: 現在値が引力点から離れるほど引き寄せる力が強くなる
         attraction = (p.attractor - p.value) * 0.05
-        perturbation = p.range * p.speed * (random.random() * 2.0 - 1.0)  # noqa: S311
+        perturbation = (  # noqa: S311
+            p.range * p.speed * (random.random() * 2.0 - 1.0)
+        )
         new_val = p.value + attraction + perturbation
 
         # 境界でクランプ（引力点 ± range）

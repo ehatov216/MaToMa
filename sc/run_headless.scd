@@ -43,22 +43,35 @@ thisProcess.openUDPPort(57200);
 // GVerb 等の大型UGen に必要な RTメモリ（デフォルト 8MB → 128MB）
 s.options.memSize = 131072;
 
-// 出力デバイスを設定（backend/audio_device.txt から読み込む、なければデフォルト）
-~matomaDeviceConfig = ~matomaScDir.dirname +/+ "backend" +/+ "audio_device.txt";
-s.options.outDevice = if (File.exists(~matomaDeviceConfig)) {
-    var f = File(~matomaDeviceConfig, "r");
-    var d = f.readAllString;
-    f.close;
-    d.asString
-} { "" };
-s.options.inDevice  = "";
-"出力デバイス: %".format(
-    if (s.options.outDevice.isEmpty) { "(システムデフォルト)" } { s.options.outDevice }
-).postln;
+// ── オーディオデバイス設定 ───────────────────────────────────────────
+//
+// 【設計方針】
+// s.options は一切変更しない（= すべてデフォルト値）。
+//
+// 理由:
+//   s.options.numInputBusChannels = 0 や sampleRate = 44100 など
+//   デフォルト以外の値を設定すると、scsynth の起動・再起動時に
+//   CoreAudio がデバイスを再設定する。この再設定の瞬間に
+//   他アプリ（Music.app, Zoom 等）の音声ストリームが中断される。
+//   （macOS Sequoia での実測により確認）
+//
+// MaToMa は音声入力を使わないが、入力チャンネル数を 0 に強制すると
+// 上記の問題が起きるため、デフォルト（2ch）のままにする。
+// 入力バスは確保されるが、使用しなければ音には影響しない。
+//
+"出力デバイス: (macOS システムデフォルト)".postln;
 
 s.waitForBoot({
     "SCサーバー起動完了".postln;
     "MaToMa OSC受信ポート: 57200".postln;
+    // ── 実際に使用されたサンプルレートとデバイスをログ出力 ───────────
+    // 「他アプリの音が止まる問題」のデバッグ用。
+    // ここに表示されたサンプルレートが macOS システムの設定と一致していれば正常。
+    "=== オーディオ設定確認 ===".postln;
+    "  実際のサンプルレート: % Hz".format(s.sampleRate).postln;
+    "  出力チャンネル数    : %".format(s.options.numOutputBusChannels).postln;
+    "  入力チャンネル数    : % (0=マイク無効)".format(s.options.numInputBusChannels).postln;
+    "=========================".postln;
 
     // scsynth が落ちたら自動再起動
     ServerQuit.add({
@@ -241,19 +254,26 @@ s.waitForBoot({
     OSCdef(\matoma_drone_param, { |msg|
         var param = msg[1].asSymbol;
         var value = msg[2].asFloat;
+        // 許可リスト: 想定外のシンボルでSynth内部パラメーターを書き換えられないようにする
+        var allowed = #[\freq_norm, \freq, \feedback_amt, \shimmer,
+                        \room, \amp, \detune, \drift, \chaos, \cutoff, \gate];
         {
-            if (~currentDrone.notNil) {
-                switch(param)
-                { \freq_norm } {
-                    // 0〜1 → 20〜300Hz（超低域〜中低域）
-                    var hz = value.linexp(0.0, 1.0, 20.0, 300.0);
-                    ~currentDrone.set(\freq, hz);
-                    "ドローン freq: % → % Hz".format(value.round(0.01), hz.round(0.1)).postln;
-                }
-                {
-                    // その他（feedback_amt, shimmer, room, amp 等）はそのまま渡す
-                    ~currentDrone.set(param, value);
-                    "ドローン param: % = %".format(param, value.round(0.001)).postln;
+            if (allowed.includes(param).not) {
+                "ドローン param: 許可されていないパラメーター '%' を無視".format(param).postln;
+            } {
+                if (~currentDrone.notNil) {
+                    switch(param)
+                    { \freq_norm } {
+                        // 0〜1 → 20〜300Hz（超低域〜中低域）
+                        var hz = value.linexp(0.0, 1.0, 20.0, 300.0);
+                        ~currentDrone.set(\freq, hz);
+                        "ドローン freq: % → % Hz".format(value.round(0.01), hz.round(0.1)).postln;
+                    }
+                    {
+                        // その他（feedback_amt, shimmer, room, amp 等）はそのまま渡す
+                        ~currentDrone.set(param, value);
+                        "ドローン param: % = %".format(param, value.round(0.001)).postln;
+                    };
                 };
             };
         }.defer;
@@ -445,10 +465,16 @@ s.waitForBoot({
     OSCdef(\matoma_granular_param, { |msg|
         var param = msg[1].asSymbol;
         var value = msg[2].asFloat;
+        var allowed = #[\density, \spray, \pos, \size, \room, \amp,
+                        \gate, \buf, \rate, \pan];
         {
-            if (~currentGranular.notNil) {
-                ~currentGranular.set(param, value);
-                "グラニュラー param: % = %".format(param, value.round(0.001)).postln;
+            if (allowed.includes(param).not) {
+                "グラニュラー param: 許可されていないパラメーター '%' を無視".format(param).postln;
+            } {
+                if (~currentGranular.notNil) {
+                    ~currentGranular.set(param, value);
+                    "グラニュラー param: % = %".format(param, value.round(0.001)).postln;
+                };
             };
         }.defer;
     }, '/matoma/granular/param', nil, 57200);
@@ -665,8 +691,16 @@ s.waitForBoot({
     }, '/matoma/effect/delay/stop', nil, 57200);
 
     OSCdef(\matoma_delay_param, { |msg|
-        var param = msg[1].asSymbol; var value = msg[2].asFloat;
-        { if (~currentDelay.notNil) { ~currentDelay.set(param, value); }; }.defer;
+        var param = msg[1].asSymbol;
+        var value = msg[2].asFloat;
+        var allowed = #[\delayTime, \decayTime, \mix, \amp, \gate];
+        {
+            if (allowed.includes(param).not) {
+                "ディレイ param: 許可されていないパラメーター '%' を無視".format(param).postln;
+            } {
+                if (~currentDelay.notNil) { ~currentDelay.set(param, value); };
+            };
+        }.defer;
     }, '/matoma/effect/delay/param', nil, 57200);
 
     // Effect OSCdef: Spectral Freeze
@@ -982,6 +1016,21 @@ s.waitForBoot({
     "パーカッションシーケンサー ロード完了".postln;
 
     // ══════════════════════════════════════════════════════════════
+    // ■ STEP 8b: DRONE GENERATORS — 5種類のドローンジェネレーター
+    //
+    //   GitHubオープンソースから取り込んだ5種類の合成手法。
+    //   各ドローンは独立して起動・停止できる（~droneGenerators で管理）。
+    //     1. fm        — FM+グリッサンド  (a_loss_of_self)
+    //     2. noise     — 多声バンドパス   (DroneCollider)
+    //     3. wavetable — WT+デグレード    (SCgazer)
+    //     4. feedback  — FBネットワーク   (rumush)
+    //     5. sines     — 揺れるSinOsc雲  (Meandering Sines)
+    // ══════════════════════════════════════════════════════════════
+    load(~matomaScDir +/+ "drone_generators.scd");
+    s.sync;
+    "ドローンジェネレーター (5種) ロード完了".postln;
+
+    // ══════════════════════════════════════════════════════════════
     // ■ STEP 9: 常駐シンセ・自動スタート
     //
     //   【起動順序】
@@ -1082,6 +1131,8 @@ s.waitForBoot({
     "  Turing Machine  : /matoma/rhythmic/start|stop|trigger|param".postln;
     "  Effects         : /matoma/effect/[delay|spectral|wavefolder|feedback]/start|stop|param".postln;
     "  Percussion      : /matoma/perc/start|stop|step|bpm|filter|amp|clear".postln;
+    "  Drone Gen (5種) : /matoma/drone/[fm|noise|wavetable|feedback|sines]/start|stop|param".postln;
+    "                    /matoma/drone/all/stop".postln;
     "".postln;
     "  自動起動済み:".postln;
     "    - Effect パススルー (~effectBus → Out 0)".postln;

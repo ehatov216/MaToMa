@@ -10,6 +10,8 @@ WebSocket経由でブラウザに転送する中継役。
 """
 
 import asyncio
+import ctypes
+import ctypes.util
 import json
 import logging
 import os
@@ -19,10 +21,95 @@ import subprocess
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Optional
 
+import websockets
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import AsyncIOOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
+
+from autonomous import AutonomousMode, ChaosEngine
+from scenes import get_scene, scene_to_osc_messages
+from sequencer import TuringSequencer
+from tidal_controller import TidalController
+from tidal_patterns import make_chord_pattern, make_arp_pattern, make_drum_pattern
+
+
+def _coreaudio_lib():
+    return ctypes.cdll.LoadLibrary(ctypes.util.find_library("CoreAudio"))
+
+
+def set_system_audio_output_device(device_name: str) -> bool:
+    """
+    CoreAudio を使って macOS のデフォルト出力デバイスを変更する。
+    SC は outDevice=nil でシステムデフォルトを使うため、
+    デバイス変更はこの関数で行う（SC の unixCmd はスペース入り名を壊すため）。
+    戻り値: 成功=True
+    """
+    kAudioHardwarePropertyDefaultOutputDevice = 0x64506c79  # 'dPly'
+    kAudioObjectPropertyScopeGlobal = 0x676c6f62           # 'glob'
+    kAudioObjectPropertyElementMain = 0
+    kAudioObjectSystemObject = 1
+    kAudioHardwarePropertyDevices = 0x64657623              # 'dev#'
+    kAudioDevicePropertyDeviceName = 0x6e616d65             # 'name'
+
+    try:
+        ca = _coreaudio_lib()
+
+        # --- デバイス一覧を取得 ---
+        prop_addr = (ctypes.c_uint32 * 3)(
+            kAudioHardwarePropertyDevices,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain,
+        )
+        data_size = ctypes.c_uint32(0)
+        ca.AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, prop_addr, 0, None, ctypes.byref(data_size))
+
+        count = data_size.value // ctypes.sizeof(ctypes.c_uint32)
+        device_ids = (ctypes.c_uint32 * count)()
+        ca.AudioObjectGetPropertyData(kAudioObjectSystemObject, prop_addr, 0, None, ctypes.byref(data_size), device_ids)
+
+        # --- デバイス名で検索 ---
+        target_id = None
+        for dev_id in device_ids:
+            name_prop = (ctypes.c_uint32 * 3)(
+                kAudioDevicePropertyDeviceName,
+                kAudioObjectPropertyScopeGlobal,
+                kAudioObjectPropertyElementMain,
+            )
+            name_buf = ctypes.create_string_buffer(256)
+            name_size = ctypes.c_uint32(256)
+            ca.AudioObjectGetPropertyData(dev_id, name_prop, 0, None, ctypes.byref(name_size), name_buf)
+            name = name_buf.value.decode("utf-8", errors="replace")
+            if name == device_name:
+                target_id = dev_id
+                break
+
+        if target_id is None:
+            log.warning(f"デバイスが見つかりません: {device_name!r}")
+            return False
+
+        # --- デフォルト出力デバイスに設定 ---
+        default_prop = (ctypes.c_uint32 * 3)(
+            kAudioHardwarePropertyDefaultOutputDevice,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain,
+        )
+        dev_id_val = ctypes.c_uint32(target_id)
+        result = ca.AudioObjectSetPropertyData(
+            kAudioObjectSystemObject, default_prop, 0, None,
+            ctypes.c_uint32(ctypes.sizeof(dev_id_val)), ctypes.byref(dev_id_val),
+        )
+        if result == 0:
+            log.info(f"システムデフォルト出力デバイスを変更: {device_name!r}")
+            return True
+        else:
+            log.warning(f"デバイス変更失敗 (CoreAudio error={result}): {device_name!r}")
+            return False
+
+    except Exception as e:
+        log.warning(f"CoreAudio デバイス変更エラー: {e}")
+        return False
 
 
 def get_audio_output_devices() -> list[str]:
@@ -45,12 +132,7 @@ def get_audio_output_devices() -> list[str]:
     except Exception as e:
         log.warning(f"オーディオデバイス取得失敗: {e}")
         return []
-import websockets
-from scenes import get_scene, scene_to_osc_messages
-from autonomous import AutonomousMode, ChaosEngine
-from tidal_controller import TidalController
-from tidal_patterns import make_chord_pattern, make_arp_pattern, make_drum_pattern
-from sequencer import TuringSequencer
+
 
 # ── PID ファイル ─────────────────────────────────────────
 PID_FILE = Path(__file__).parent / ".bridge.pid"
@@ -71,28 +153,29 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 log = logging.getLogger(__name__)
 
 # 接続中のブラウザを管理するセット
-connected_clients: set = set()
+connected_clients: set[websockets.WebSocketServerProtocol] = set()
 
 # SCへメッセージを送るクライアント
 sc_client = SimpleUDPClient(SC_HOST, SC_PORT)
 
 # 自律モード（broadcast は後で関数参照として渡す）
-autonomous: AutonomousMode
+autonomous: Optional[AutonomousMode] = None
 
 # カオスエンジン（Dejavu パターンによる記憶付きドリフト）
-chaos_engine: ChaosEngine
+chaos_engine: Optional[ChaosEngine] = None
 
 # Tidal Cycles コントローラー
-tidal: TidalController
+tidal: Optional[TidalController] = None
 
 # Turing Machine ステップシーケンサー
-sequencer: TuringSequencer
+sequencer: Optional[TuringSequencer] = None
 
 # SC プロセス
 sc_process = None
 
 # SC が ready かどうか
 sc_ready = False
+
 
 
 def find_sclang() -> str | None:
@@ -122,6 +205,25 @@ async def start_sc() -> bool:
     subprocess.run(["pkill", "-f", "sclang"], capture_output=True)
     subprocess.run(["pkill", "-f", "scsynth"], capture_output=True)
     await asyncio.sleep(1.5)
+
+    # ── audio_device.txt に保存されたデバイスを起動前に適用 ─────────────
+    # known_issues.md 問題0: SCがZoom/rekordbox仮想デバイスに出力する問題の対策。
+    # audio_device.txt にデバイス名が保存されていれば、macOS システムデフォルトを
+    # 変更してから SC を起動する。これにより SC は正しいデバイスを使う。
+    config_path = Path(__file__).parent / "audio_device.txt"
+    if config_path.exists():
+        saved_device = config_path.read_text(encoding="utf-8").strip()
+        if saved_device:
+            log.info(f"保存済みオーディオデバイスを適用: {saved_device!r}")
+            ok = set_system_audio_output_device(saved_device)
+            if ok:
+                log.info(f"  → macOS システムデフォルト出力を {saved_device!r} に変更しました")
+            else:
+                log.warning(f"  → デバイス変更失敗（デバイスが接続されていない可能性）: {saved_device!r}")
+        else:
+            log.info("audio_device.txt が空 → システムデフォルトのデバイスを使用")
+    else:
+        log.info("audio_device.txt なし → システムデフォルトのデバイスを使用")
 
     sclang = find_sclang()
     if not sclang:
@@ -223,11 +325,13 @@ def on_osc_message(address: str, *args) -> None:
         log.info("SC ready 受信 → ブラウザへ通知")
         # SC 起動完了と同時に ChaosEngine を自動スタート
         # （これがないとパラメーターが一切変化しない）
-        chaos_engine.start()
-        log.info("ChaosEngine 自動スタート")
+        if chaos_engine is not None:
+            chaos_engine.start()
+            log.info("ChaosEngine 自動スタート")
         asyncio.get_running_loop().create_task(
             broadcast({"type": "sc_ready", "message": "SC起動完了"})
         )
+        # SC起動後に他アプリの音が止まる問題を自動修復する
         return
 
     if address == "/matoma/granular/not_ready":
@@ -302,7 +406,8 @@ async def ws_handler(websocket) -> None:
                         for osc in scene_to_osc_messages(scene):
                             sc_client.send_message(osc["address"], osc["args"])
                         # ChaosEngine の引力点をシーンに合わせて更新する
-                        chaos_engine.set_scene(scene)
+                        if chaos_engine is not None:
+                            chaos_engine.set_scene(scene)
                         await broadcast({"type": "scene_changed", "scene": scene})
                         log.info(f"シーン切り替え: {scene_name}")
                     else:
@@ -310,21 +415,26 @@ async def ws_handler(websocket) -> None:
 
                 elif address == "/matoma/chaos/state":
                     # カオスエンジンの現在状態をブラウザへ送る
-                    await broadcast({
-                        "type": "chaos_state",
-                        "state": chaos_engine.get_state(),
-                    })
+                    if chaos_engine is not None:
+                        await broadcast({
+                            "type": "chaos_state",
+                            "state": chaos_engine.get_state(),
+                        })
 
                 elif address == "/matoma/all/stop":
-                    chaos_engine.stop()
-                    autonomous.stop()
+                    if chaos_engine is not None:
+                        chaos_engine.stop()
+                    if autonomous is not None:
+                        autonomous.stop()
                     sc_client.send_message("/matoma/all/stop", [])
                     log.info("全停止")
                     await broadcast({"type": "all_stopped"})
 
                 elif address == "/matoma/all/restart":
-                    chaos_engine.stop()
-                    autonomous.stop()
+                    if chaos_engine is not None:
+                        chaos_engine.stop()
+                    if autonomous is not None:
+                        autonomous.stop()
                     sc_client.send_message("/matoma/all/restart", [])
                     log.info("再セットアップ")
                     await broadcast({"type": "restarting"})
@@ -332,7 +442,7 @@ async def ws_handler(websocket) -> None:
                 elif address == "/matoma/chaos/attractor":
                     # 引力点を手動で設定する
                     # args: [layer, param, attractor, range_opt]
-                    if len(args) >= 3:
+                    if chaos_engine is not None and len(args) >= 3:
                         layer_name = str(args[0])
                         param_name = str(args[1])
                         attractor_val = float(args[2])
@@ -347,50 +457,55 @@ async def ws_handler(websocket) -> None:
 
                 elif address == "/matoma/chaos/start":
                     # カオスエンジンを開始する
-                    chaos_engine.start()
+                    if chaos_engine is not None:
+                        chaos_engine.start()
                     log.info("ChaosEngine 開始")
                     await broadcast({"type": "chaos_started"})
 
                 elif address == "/matoma/chaos/stop":
                     # カオスエンジンを停止する
-                    chaos_engine.stop()
+                    if chaos_engine is not None:
+                        chaos_engine.stop()
                     log.info("ChaosEngine 停止")
                     await broadcast({"type": "chaos_stopped"})
 
                 elif address.startswith("/matoma/autonomous/"):
                     # 自律モードの制御
-                    sub = address[len("/matoma/autonomous/"):]
-                    if sub == "start":
-                        autonomous.start()
-                        log.info("自律モード開始")
-                    elif sub == "stop":
-                        autonomous.stop()
-                        log.info("自律モード停止")
-                    elif sub == "mode" and args:
-                        autonomous.set_mode(str(args[0]))
-                        log.info(f"自律モード変更: {args[0]}")
-                    elif sub == "speed" and args:
-                        autonomous.set_speed(float(args[0]))
-                        log.info(f"自律モード速度: {args[0]}")
-                    elif sub == "target" and len(args) >= 2:
-                        autonomous.set_target(str(args[0]), float(args[1]))
-                        log.info(f"目標値設定: {args[0]} = {args[1]}")
-                    elif sub == "tidal_auto" and args:
-                        enabled = bool(args[0])
-                        autonomous.set_tidal_auto(enabled)
-                        log.info(f"Tidal自律モード: {'ON' if enabled else 'OFF'}")
-                    elif sub == "progression" and args:
-                        autonomous.set_progression(str(args[0]))
-                        log.info(f"コード進行変更: {args[0]}")
-                    elif sub == "trig_prob" and args:
-                        autonomous.set_trig_prob(float(args[0]))
-                        log.info(f"TRIG確率: {args[0]}")
-                    elif sub == "dejavu_prob" and args:
-                        autonomous.set_dejavu_prob(float(args[0]))
-                        log.info(f"Dejavu確率: {args[0]}")
-                    elif sub == "dejavu_len" and args:
-                        autonomous.set_dejavu_len(int(args[0]))
-                        log.info(f"Dejavu長さ: {args[0]}")
+                    if autonomous is None:
+                        log.warning("自律モード未初期化")
+                    else:
+                        sub = address[len("/matoma/autonomous/"):]
+                        if sub == "start":
+                            autonomous.start()
+                            log.info("自律モード開始")
+                        elif sub == "stop":
+                            autonomous.stop()
+                            log.info("自律モード停止")
+                        elif sub == "mode" and args:
+                            autonomous.set_mode(str(args[0]))
+                            log.info(f"自律モード変更: {args[0]}")
+                        elif sub == "speed" and args:
+                            autonomous.set_speed(float(args[0]))
+                            log.info(f"自律モード速度: {args[0]}")
+                        elif sub == "target" and len(args) >= 2:
+                            autonomous.set_target(str(args[0]), float(args[1]))
+                            log.info(f"目標値設定: {args[0]} = {args[1]}")
+                        elif sub == "tidal_auto" and args:
+                            enabled = bool(args[0])
+                            autonomous.set_tidal_auto(enabled)
+                            log.info(f"Tidal自律モード: {'ON' if enabled else 'OFF'}")
+                        elif sub == "progression" and args:
+                            autonomous.set_progression(str(args[0]))
+                            log.info(f"コード進行変更: {args[0]}")
+                        elif sub == "trig_prob" and args:
+                            autonomous.set_trig_prob(float(args[0]))
+                            log.info(f"TRIG確率: {args[0]}")
+                        elif sub == "dejavu_prob" and args:
+                            autonomous.set_dejavu_prob(float(args[0]))
+                            log.info(f"Dejavu確率: {args[0]}")
+                        elif sub == "dejavu_len" and args:
+                            autonomous.set_dejavu_len(int(args[0]))
+                            log.info(f"Dejavu長さ: {args[0]}")
 
                 elif address == "/matoma/audio/get_devices":
                     # デバイスリストは Python 側で取得（SC OSC 経由では名前が途切れるため）
@@ -406,9 +521,21 @@ async def ws_handler(websocket) -> None:
 
                 elif address == "/matoma/audio/set_device":
                     device_name = str(args[0]) if args else ""
-                    config_path = Path(__file__).parent / "audio_device.txt"
-                    config_path.write_text(device_name, encoding="utf-8")
-                    log.info(f"音声デバイス設定を保存: {device_name!r}")
+                    # SC の unixCmd はスペース含みデバイス名を壊すため、
+                    # bridge.py が CoreAudio 経由で macOS システムデフォルトを変更する。
+                    # SC は outDevice=nil でシステムデフォルトを使う設計。
+                    if device_name:
+                        set_system_audio_output_device(device_name)
+                        # ── 選択したデバイスを audio_device.txt に永続化 ──────────
+                        # 次回起動時にも同じデバイスが使われるようにする。
+                        # （start_sc() 冒頭でこのファイルを読んで適用する）
+                        try:
+                            config_path = Path(__file__).parent / "audio_device.txt"
+                            config_path.write_text(device_name, encoding="utf-8")
+                            log.info(f"audio_device.txt に保存: {device_name!r}")
+                        except Exception as e:
+                            log.warning(f"audio_device.txt 保存失敗: {e}")
+                    log.info(f"音声デバイス切替 → システムデフォルト変更: {device_name!r}")
                     await broadcast({
                         "type": "sc_booting",
                         "message": f"デバイス「{device_name or 'デフォルト'}」へ切替のため SC を再起動中...",
@@ -431,16 +558,19 @@ async def ws_handler(websocket) -> None:
 
                 else:
                     # 手動スライダー操作時に自律モードの現在値を同期する
-                    if address == "/matoma/param" and len(args) >= 2:
-                        autonomous.sync_current(str(args[0]), float(args[1]))
-                    elif address == "/matoma/drone/param" and len(args) >= 2:
-                        autonomous.sync_current(
-                            "drone_" + str(args[0]), float(args[1])
-                        )
+                    if autonomous is not None:
+                        if address == "/matoma/param" and len(args) >= 2:
+                            autonomous.sync_current(str(args[0]), float(args[1]))
+                        elif address == "/matoma/drone/param" and len(args) >= 2:
+                            autonomous.sync_current(
+                                "drone_" + str(args[0]), float(args[1])
+                            )
                     sc_client.send_message(address, args)
                     log.info(f"SCへ転送: {address}  args={args}")
-            except (json.JSONDecodeError, Exception) as e:
-                log.warning(f"メッセージ解析エラー: {e}")
+            except json.JSONDecodeError:
+                log.warning("不正なJSONを受信しました")
+            except Exception as e:
+                log.warning(f"メッセージ処理エラー: {e}")
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:

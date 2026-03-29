@@ -15,6 +15,10 @@ python-osc       # OSC送受信 (pythonosc)
 websockets       # WebSocketサーバー
 asyncio          # 非同期I/O (標準ライブラリ)
 chromadb         # ベクトルDB (RAG用)
+anthropic        # Claude API (claude_tidal.py)
+pytest           # テストフレームワーク
+pytest-asyncio   # 非同期テスト
+pytest-playwright # E2Eテスト
 ```
 
 ## SuperCollider UGen / Quarks

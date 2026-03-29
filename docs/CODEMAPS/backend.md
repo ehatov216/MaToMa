@@ -1,4 +1,4 @@
-<!-- Generated: 2026-03-29 | Files scanned: 9 Python files | Token estimate: ~700 -->
+<!-- Generated: 2026-03-29 | Files scanned: 8 Python files | Token estimate: ~850 -->
 # Backend Architecture
 
 ## Entry Point
@@ -8,8 +8,8 @@
 ## OSC Routes (SC → Python, port 9000)
 
 ```
-/matoma/ready           → SC起動完了通知 → broadcast("sc_ready")
-/matoma/seq/tick        → シーケンサーステップ → broadcast("seq_tick")
+/matoma/ready            → SC起動完了通知 → broadcast("sc_ready")
+/matoma/seq/tick         → シーケンサーステップ → broadcast("seq_tick")
 /matoma/granular/density → グレイン密度 → broadcast("granular_density")
 ```
 
@@ -31,32 +31,40 @@
 ## Module Map
 
 ```
-bridge.py (586行)
-  ├── start_sc()              — sclang起動・ブートstrap
-  ├── ws_handler()            — WebSocket接続管理・ルーティング
-  ├── on_osc_message()        — SC→Python OSC受信
-  ├── broadcast()             — 全クライアントWS送信
-  ├── _handle_tidal()         — Tidal Cyclesコマンド処理
-  ├── _handle_seq()           — シーケンサー制御
-  └── _handle_granular_browse() — macOSファイル選択
+bridge.py (731行)
+  ├── start_sc()                — sclang起動・bootstrap
+  ├── ws_handler()              — WebSocket接続管理・ルーティング
+  ├── on_osc_message()          — SC→Python OSC受信
+  ├── broadcast()               — 全クライアントWS送信
+  ├── _handle_tidal()           — Tidal Cyclesコマンド処理
+  ├── _handle_seq()             — シーケンサー制御
+  ├── _handle_granular_browse() — macOSファイル選択
+  ├── _convert_mp3_to_wav()     — MP3→WAV変換 (ffmpeg)
+  ├── _acquire_pid_lock()       — 多重起動防止ロック取得
+  └── _release_pid_lock()       — ロック解放
 
-scenes.py (46行)
-  ├── load_scenes()           — scenes.json 読み込み
-  ├── get_scene(name)         — 名前でシーン取得
-  └── scene_to_osc_messages() — シーン→OSCリスト変換
+scenes.py (107行)
+  ├── load_scenes()             — scenes.json 読み込み
+  ├── get_scene(name)           — 名前でシーン取得
+  └── scene_to_osc_messages()   — シーン→OSCリスト変換
 
-autonomous.py (307行) — class AutonomousMode
-  ├── start() / stop()
-  ├── set_mode("random"|"directed")
-  ├── set_speed(0.0-1.0)
-  ├── set_trig_prob(prob)     — 各パラメーター変化確率
-  ├── set_dejavu_prob(prob)   — 履歴再生確率
-  ├── set_dejavu_len(1-32)    — 履歴参照深さ
-  ├── set_tidal_auto(bool)    — Tidal自動コード進行
-  ├── set_progression(name)  — コード進行プリセット変更
-  └── sync_current(param, val) — 手動操作値の同期
+autonomous.py (631行)
+  ├── class AutonomousMode      — 自律モード制御インターフェース
+  │   ├── start() / stop()
+  │   ├── set_mode("random"|"directed")
+  │   ├── set_speed(0.0-1.0)
+  │   ├── set_trig_prob(prob)   — 各パラメーター変化確率
+  │   ├── set_dejavu_prob(prob) — 履歴再生確率
+  │   ├── set_dejavu_len(1-32)  — 履歴参照深さ
+  │   ├── set_tidal_auto(bool)  — Tidal自動コード進行
+  │   └── set_progression(name) — コード進行プリセット変更
+  └── class ChaosEngine         — 確率的パラメーター変化エンジン
+      ├── set_scene(scene_name) — シーン別引力点を設定
+      ├── next_value(param)     — bounded random walk で次値算出
+      ├── tick()                — 定期実行: OSC送信 + 履歴蓄積
+      └── get_state()
 
-sequencer.py (209行) — class TuringSequencer
+sequencer.py (208行) — class TuringSequencer
   ├── start() / stop()
   ├── set_bpm(20-300)
   ├── set_step_div("1/4"|"1/8"|"1/16"|"1/32")
@@ -66,19 +74,25 @@ sequencer.py (209行) — class TuringSequencer
   ├── set_active_params([...])
   └── get_state()
 
-tidal_controller.py — class TidalController
-  ├── start(boot_path)        — GHCi起動
-  ├── stop()                  — 全停止
-  ├── evaluate(code)          — Tidalコード実行
+tidal_controller.py (204行) — class TidalController
+  ├── start(boot_path)          — GHCi起動
+  ├── stop()                    — 全停止
+  ├── evaluate(code)            — Tidalコード実行
   ├── set_tempo(bpm)
   └── hush()
 
-tidal_patterns.py — パターン生成ヘルパー
+tidal_patterns.py (227行) — パターン生成ヘルパー
   ├── tempo_to_cps(bpm, beats_per_cycle)
   ├── make_chord_pattern(...)
   ├── make_scale_pattern(...)
   ├── make_arp_pattern(...)
   └── make_drum_pattern(...)
+
+claude_tidal.py (244行) — Claude API統合
+  ├── get_current_state()       — ブリッジから現在パラメーター取得
+  ├── send_to_bridge(code)      — Tidalコードをブリッジへ送信
+  ├── retrieve_rag_context(prompt) — ChromaDB から関連ドキュメント検索
+  └── translate_with_claude(prompt, state) — 日本語→Tidalコード変換
 ```
 
 ## Global State (bridge.py)
@@ -92,7 +106,7 @@ sequencer: TuringSequencer          # シーケンサーインスタンス
 sc_ready: bool                      # SCブートフラグ
 ```
 
-## Key Data: PARAM_SPECS (autonomous.py)
+## Key Data: PARAM_SPECS (autonomous.py / ChaosEngine)
 
 ```python
 "freq"         → /matoma/param       55-880 Hz

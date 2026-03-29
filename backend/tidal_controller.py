@@ -23,9 +23,14 @@ def _find_boot_tidal() -> Path | None:
     """BootTidal.hs のパスを自動検出する（macOS / Linux）。"""
     patterns = [
         # Cabal インストール（macOS）
-        str(Path.home() / ".cabal" / "share" / "*" / "tidal-*" / "BootTidal.hs"),
+        str(
+            Path.home() / ".cabal" / "share" / "*" / "tidal-*" / "BootTidal.hs"
+        ),
         # Stack インストール
-        str(Path.home() / ".stack" / "snapshots" / "*" / "*" / "*" / "share" / "tidal-*" / "BootTidal.hs"),
+        str(
+            Path.home() / ".stack" / "snapshots"
+            / "*" / "*" / "*" / "share" / "tidal-*" / "BootTidal.hs"
+        ),
         # Linux / NixOS
         "/usr/share/tidal/BootTidal.hs",
         "/usr/local/share/tidal/BootTidal.hs",
@@ -62,7 +67,11 @@ class TidalController:
 
     @property
     def is_running(self) -> bool:
-        return self._running and self._proc is not None and self._proc.poll() is None
+        return (
+            self._running
+            and self._proc is not None
+            and self._proc.poll() is None
+        )
 
     def start(self, boot_path: str | None = None) -> bool:
         """GHCiとTidalを起動する。
@@ -100,7 +109,9 @@ class TidalController:
             return False
 
         # バックグラウンドでGHCiの出力を読む
-        self._reader_thread = threading.Thread(target=self._read_output, daemon=True)
+        self._reader_thread = threading.Thread(
+            target=self._read_output, daemon=True
+        )
         self._reader_thread.start()
 
         # 起動を待つ
@@ -121,8 +132,8 @@ class TidalController:
                 self._write("hush")
                 time.sleep(0.5)
                 self._proc.terminate()
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning(f"Tidal停止中にエラー: {e}")
         self._running = False
         self._proc = None
         log.info("Tidal停止")
@@ -143,7 +154,10 @@ class TidalController:
         time.sleep(0.5)
         self._write("(cps, nudge) <- bpsUtils")
         time.sleep(0.5)
-        self._write("tidal <- startTidal (superdirtTarget {oLatency = 0.1}) defaultConfig")
+        self._write(
+            "tidal <- startTidal"
+            " (superdirtTarget {oLatency = 0.1}) defaultConfig"
+        )
         time.sleep(2)
 
         aliases = [

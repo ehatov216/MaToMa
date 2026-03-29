@@ -38,7 +38,9 @@ class KnowledgeRetriever:
             n_results: Number of results to retrieve by default
         """
         if not CHROMADB_AVAILABLE:
-            raise RuntimeError("ChromaDB not installed. Run: poetry add chromadb")
+            raise RuntimeError(
+                "ChromaDB not installed. Run: poetry add chromadb"
+            )
 
         if db_path is None:
             db_path = Path(__file__).parent / "chroma_db"
@@ -61,7 +63,10 @@ class KnowledgeRetriever:
             count = self.collection.count()
             logger.info(f"RAG retriever initialized with {count} chunks")
         except Exception as e:
-            logger.warning(f"Could not open RAG collection: {e}. " "Index may need to be rebuilt.")
+            logger.warning(
+                f"Could not open RAG collection: {e}. "
+                "Index may need to be rebuilt."
+            )
             self.collection = None  # type: ignore[assignment]
 
     def query(
@@ -174,20 +179,28 @@ class KnowledgeRetriever:
         # Full query first
         full_result = self.query(text, n_results=n_results or self.n_results)
 
-        # Filter by category
-        filtered_chunks = []
-        filtered_scores = []
+        # Filter by category（新インスタンスを返すイミュータブル更新）
+        pairs = [
+            (chunk, score)
+            for chunk, score in zip(
+                full_result.chunks, full_result.scores, strict=False
+            )
+            if chunk.category == category
+        ]
+        filtered_chunks = [c for c, _ in pairs]
+        filtered_scores = [s for _, s in pairs]
 
-        for chunk, score in zip(full_result.chunks, full_result.scores, strict=False):
-            if chunk.category == category:
-                filtered_chunks.append(chunk)
-                filtered_scores.append(score)
-
-        full_result.chunks = filtered_chunks
-        full_result.scores = filtered_scores
-        full_result.total_results = len(filtered_chunks)
-
-        return full_result
+        return RetrievalResult(
+            query=full_result.query,
+            chunks=filtered_chunks,
+            scores=filtered_scores,
+            total_results=len(filtered_chunks),
+            query_time_ms=full_result.query_time_ms,
+            source_distribution={
+                c.source_file: filtered_chunks.count(c)
+                for c in filtered_chunks
+            },
+        )
 
 
 def query_rag(query_text: str, n_results: int = 3) -> RetrievalResult:
@@ -210,8 +223,12 @@ def query_rag(query_text: str, n_results: int = 3) -> RetrievalResult:
     logger.info(f"Query: {query_text}")
     logger.info(f"Results: {len(result.chunks)}")
 
-    for i, (chunk, score) in enumerate(zip(result.chunks, result.scores, strict=False), 1):
-        logger.info(f"  {i}. [{score:.2%}] {chunk.section} " f"({chunk.source_file})")
+    for i, (chunk, score) in enumerate(
+        zip(result.chunks, result.scores, strict=False), 1
+    ):
+        logger.info(
+            f"  {i}. [{score:.2%}] {chunk.section} ({chunk.source_file})"
+        )
         logger.info(f"     {chunk.content[:100]}...")
 
     return result
@@ -223,4 +240,6 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         query_rag(sys.argv[1])
     else:
-        print("Usage: python -m " "sonic_anatomy.knowledge.rag.retriever '<query>'")
+        print(
+            "Usage: python -m sonic_anatomy.knowledge.rag.retriever '<query>'"
+        )

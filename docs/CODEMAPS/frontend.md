@@ -5,7 +5,7 @@
 
 - HTML5 + 純JavaScript（フレームワーク不使用）
 - WebSocket: `ws://localhost:8765`
-- 1ファイル構成: `frontend/index.html` (~3000行)
+- 1ファイル構成: `frontend/index.html` (1551行)
 
 ## UI モジュール一覧
 

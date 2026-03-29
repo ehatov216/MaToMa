@@ -311,20 +311,28 @@ s.waitForBoot({
         var synthName = msg[1].asSymbol;
         var freq = msg[2].asFloat;
         var amp  = msg[3].asFloat;
+        // 許可リスト: OSC経由で任意のSynthDefを実行されないようにする
+        var allowed = #[\matoma_rhythmic_grain, \matoma_rhythmic_klank,
+                        \matoma_rhythmic_fm, \matoma_rhythmic_spring,
+                        \matoma_rhythmic_chaos];
         {
-            var buf = if (synthName == \matoma_rhythmic_grain) {
-                ~rhythmicBuf.bufnum
-            } { 0 };
+            if (allowed.includes(synthName).not) {
+                "リズムトリガー: 許可されていないSynthDef '%' を無視".format(synthName).postln;
+            } {
+                var buf = if (synthName == \matoma_rhythmic_grain) {
+                    ~rhythmicBuf.bufnum
+                } { 0 };
 
-            Synth(synthName, [
-                \freq,   freq,
-                \amp,    amp,
-                \buf,    buf,
-                \outBus, ~effectBus.index
-            ], addAction: \addToTail);
+                Synth(synthName, [
+                    \freq,   freq,
+                    \amp,    amp,
+                    \buf,    buf,
+                    \outBus, ~effectBus.index
+                ], addAction: \addToTail);
 
-            "リズムトリガー: % (freq: %, amp: %)".format(
-                synthName, freq.round(0.01), amp.round(0.001)).postln;
+                "リズムトリガー: % (freq: %, amp: %)".format(
+                    synthName, freq.round(0.01), amp.round(0.001)).postln;
+            };
         }.defer;
     }, '/matoma/rhythmic/trigger');
 
@@ -398,11 +406,18 @@ s.waitForBoot({
     // ── OSCdef: リズム用バッファのロード ─────────────────────────────
     OSCdef(\matoma_rhythmic_load, { |msg|
         var path = msg[1].asString;
+        // パス検証: 許可された拡張子のみ受け付ける（パストラバーサル対策）
+        var allowedExts = #["wav", "aif", "aiff", "flac"];
+        var ext = PathName(path).extension.toLower;
         {
-            if (~rhythmicBuf.notNil) { ~rhythmicBuf.free; };
-            ~rhythmicBuf = Buffer.read(s, path, action: { |buf|
-                "リズムバッファ ロード完了: % (% frames)".format(path, buf.numFrames).postln;
-            });
+            if (allowedExts.includes(ext).not) {
+                "リズムバッファ: 許可されていないファイル形式 '%' を無視".format(ext).postln;
+            } {
+                if (~rhythmicBuf.notNil) { ~rhythmicBuf.free; };
+                ~rhythmicBuf = Buffer.read(s, path, action: { |buf|
+                    "リズムバッファ ロード完了: % (% frames)".format(path, buf.numFrames).postln;
+                });
+            };
         }.defer;
     }, '/matoma/rhythmic/load');
 

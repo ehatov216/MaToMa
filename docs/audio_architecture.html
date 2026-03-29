@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MaToMa — オーディオアーキテクチャ</title>
+<style>
+  :root {
+    --bg:          #0a0c10;
+    --surface:     #111418;
+    --border:      #1e2430;
+    --accent-blue: #3b82f6;
+    --accent-cyan: #06b6d4;
+    --accent-pur:  #8b5cf6;
+    --accent-grn:  #22c55e;
+    --accent-org:  #f97316;
+    --accent-yel:  #eab308;
+    --accent-red:  #ef4444;
+    --accent-pink: #ec4899;
+    --text:        #e2e8f0;
+    --text-dim:    #64748b;
+    --text-xs:     #94a3b8;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Hiragino Sans', 'Noto Sans JP', 'SF Pro Display', system-ui, sans-serif;
+    min-height: 100vh;
+    padding: 32px 24px 64px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  /* ─── Header ─────────────────────────────── */
+  .header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+  .header h1 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: #fff;
+  }
+  .header h1 span { color: var(--accent-cyan); }
+  .header p {
+    margin-top: 6px;
+    color: var(--text-dim);
+    font-size: 12px;
+    letter-spacing: 0.05em;
+  }
+
+  /* ─── Legend ─────────────────────────────── */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 24px;
+    justify-content: center;
+    margin-bottom: 36px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-xs);
+  }
+  .legend-dot {
+    width: 10px; height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  /* ─── Layout columns ─────────────────────── */
+  .arch-wrap {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  /* ─── Row label ──────────────────────────── */
+  .row-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+    padding-left: 4px;
+  }
+
+  /* ─── Connector arrows ───────────────────── */
+  .connector-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0;
+    height: 40px;
+    position: relative;
+  }
+  .connector-row svg { overflow: visible; }
+
+  /* ─── Generic card ───────────────────────── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    position: relative;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .card:hover {
+    border-color: #2d3748;
+    box-shadow: 0 0 16px rgba(255,255,255,0.04);
+    z-index: 10;
+  }
+  .card-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .card-subtitle {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  .tag {
+    display: inline-block;
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    margin: 1px 2px 1px 0;
+  }
+  .badge {
+    font-size: 9px;
+    color: var(--text-dim);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    display: inline-block;
+    margin: 1px 2px 1px 0;
+  }
+
+  /* ─── Color variants ─────────────────────── */
+  .c-drone    { --c: var(--accent-org);  }
+  .c-granular { --c: var(--accent-yel);  }
+  .c-perc     { --c: var(--accent-red);  }
+  .c-rhythmic { --c: var(--accent-pink); }
+  .c-bus      { --c: var(--accent-cyan); }
+  .c-effect   { --c: var(--accent-pur);  }
+  .c-output   { --c: var(--accent-grn);  }
+  .c-control  { --c: var(--accent-blue); }
+  .c-auto     { --c: #a78bfa;            }
+
+  .card[class*="c-"] {
+    border-left: 3px solid var(--c);
+  }
+  .card[class*="c-"] .card-title { color: var(--c); }
+  .tag[class*="c-"] {
+    background: color-mix(in srgb, var(--c) 15%, transparent);
+    color: var(--c);
+  }
+
+  /* ─── ROW: Control ───────────────────────── */
+  .row-control {
+    display: grid;
+    grid-template-columns: 1fr 80px 1fr 80px 1fr 80px 1fr;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 0;
+  }
+  .arrow-h {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding-top: 4px;
+  }
+  .arrow-h svg { width: 60px; height: 24px; }
+
+  /* ─── ROW: Sources ───────────────────────── */
+  .row-sources {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+
+  /* ─── Synth chain detail ─────────────────── */
+  .chain {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin-top: 8px;
+  }
+  .chain-node {
+    font-size: 9px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.03);
+    color: var(--text-xs);
+    white-space: nowrap;
+  }
+  .chain-arrow {
+    color: var(--text-dim);
+    font-size: 10px;
+  }
+
+  /* ─── ROW: Buses ─────────────────────────── */
+  .row-buses {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .bus-card {
+    background: linear-gradient(135deg, rgba(6,182,212,0.08), rgba(6,182,212,0.03));
+    border: 1px dashed rgba(6,182,212,0.35);
+    border-radius: 10px;
+    padding: 10px 14px;
+    position: relative;
+    overflow: hidden;
+  }
+  .bus-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent-cyan), transparent);
+    animation: busFlow 2s linear infinite;
+  }
+  @keyframes busFlow {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+  .bus-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent-cyan);
+    letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+  .bus-desc {
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  .bus-from, .bus-to {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+    font-size: 9px;
+  }
+  .bus-label { color: var(--text-dim); margin-right: 2px; }
+
+  /* ─── ROW: Effects ───────────────────────── */
+  .row-effects {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .effect-card {
+    background: linear-gradient(135deg, rgba(139,92,246,0.1), rgba(139,92,246,0.04));
+    border: 1px solid rgba(139,92,246,0.25);
+    border-radius: 10px;
+    padding: 12px 14px;
+    position: relative;
+  }
+  .effect-num {
+    position: absolute;
+    top: 8px; right: 10px;
+    font-size: 9px;
+    color: rgba(139,92,246,0.5);
+    font-weight: 700;
+    letter-spacing: 0.1em;
+  }
+  .effect-name {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent-pur);
+    margin-bottom: 4px;
+  }
+  .effect-en {
+    font-size: 9px;
+    color: rgba(139,92,246,0.6);
+    margin-bottom: 6px;
+    letter-spacing: 0.05em;
+  }
+  .effect-params { font-size: 9px; color: var(--text-dim); }
+
+  /* ─── ROW: Output ────────────────────────── */
+  .output-card {
+    background: linear-gradient(135deg, rgba(34,197,94,0.1), rgba(34,197,94,0.03));
+    border: 1px solid rgba(34,197,94,0.3);
+    border-radius: 10px;
+    padding: 16px 24px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .output-card::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent-grn), transparent);
+    animation: busFlow 1.5s linear infinite reverse;
+  }
+  .output-icon {
+    font-size: 28px;
+    margin-bottom: 6px;
+    filter: drop-shadow(0 0 8px rgba(34,197,94,0.5));
+  }
+  .output-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent-grn);
+    letter-spacing: 0.1em;
+  }
+  .output-sub {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  /* ─── Autonomous section ─────────────────── */
+  .auto-section {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .auto-card {
+    background: linear-gradient(135deg, rgba(167,139,250,0.08), rgba(167,139,250,0.02));
+    border: 1px solid rgba(167,139,250,0.2);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .auto-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #a78bfa;
+    margin-bottom: 6px;
+  }
+  .auto-desc {
+    font-size: 10px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+
+  /* ─── Section spacer ─────────────────────── */
+  .section {
+    margin-top: 28px;
+  }
+  .section:first-child { margin-top: 0; }
+
+  /* ─── Vertical connector ─────────────────── */
+  .v-connector {
+    display: flex;
+    justify-content: center;
+    padding: 4px 0;
+  }
+  .v-connector svg { overflow: visible; }
+
+  /* ─── Port annotations ───────────────────── */
+  .port-row {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+  }
+  .port-badge {
+    font-size: 9px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .port-badge span { color: var(--text-xs); }
+
+  /* ─── Responsive ─────────────────────────── */
+  @media (max-width: 800px) {
+    .row-sources, .row-effects { grid-template-columns: repeat(2, 1fr); }
+    .row-control { grid-template-columns: 1fr; gap: 8px; }
+    .arrow-h { display: none; }
+    .auto-section { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Ma<span>To</span>Ma — オーディオ・アーキテクチャ</h1>
+  <p>音の生成 → バス集約 → エフェクト → 出力　の全シグナルフローを可視化</p>
+</div>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div>音源（ドローン）</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#eab308"></div>音源（グラニュラー）</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>音源（パーカッション）</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#ec4899"></div>音源（リズム）</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#06b6d4"></div>共有バス</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div>エフェクト層</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>最終出力</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>制御層</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#a78bfa"></div>自律システム</div>
+</div>
+
+<div class="arch-wrap">
+
+  <!-- ══════════════════════════════════════════════════════
+       SECTION: 制御層（Control Layer）
+  ══════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="row-label">① 制御層 — Human Control</div>
+    <div class="row-control">
+
+      <div class="card c-control">
+        <div class="card-title">ブラウザ UI</div>
+        <div class="card-subtitle">frontend / index.html</div>
+        <span class="badge">スライダー</span>
+        <span class="badge">パッド</span>
+        <span class="badge">シーン切替</span>
+      </div>
+
+      <div class="arrow-h">
+        <svg viewBox="0 0 60 24"><defs><marker id="a1" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#3b82f6"/></marker></defs>
+          <line x1="2" y1="12" x2="52" y2="12" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#a1)"/>
+          <line x1="52" y1="12" x2="2" y2="12" stroke="#3b82f6" stroke-width="1.5" marker-start="url(#a1)" marker-end="none" style="marker-start:url(#a1)"/>
+          <text x="30" y="9" text-anchor="middle" font-size="7" fill="#3b82f6" font-family="monospace">WS:8765</text>
+        </svg>
+      </div>
+
+      <div class="card c-control">
+        <div class="card-title">Python Bridge</div>
+        <div class="card-subtitle">backend / bridge.py</div>
+        <span class="badge">WebSocket</span>
+        <span class="badge">OSC転送</span>
+        <span class="badge">シーン管理</span>
+      </div>
+
+      <div class="arrow-h">
+        <svg viewBox="0 0 60 24"><defs><marker id="a2" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#3b82f6"/></marker></defs>
+          <line x1="2" y1="12" x2="52" y2="12" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#a2)"/>
+          <text x="30" y="9" text-anchor="middle" font-size="7" fill="#3b82f6" font-family="monospace">OSC→:57200</text>
+          <text x="30" y="21" text-anchor="middle" font-size="7" fill="#3b82f6" font-family="monospace">←:9000</text>
+        </svg>
+      </div>
+
+      <div class="card c-control">
+        <div class="card-title">SuperCollider</div>
+        <div class="card-subtitle">sc / run_headless.scd</div>
+        <span class="badge">sclang</span>
+        <span class="badge">scsynth</span>
+        <span class="badge">OSCdef</span>
+      </div>
+
+      <div class="arrow-h">
+        <svg viewBox="0 0 60 24"><defs><marker id="a3" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#3b82f6"/></marker></defs>
+          <line x1="2" y1="12" x2="52" y2="12" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#a3)"/>
+          <text x="30" y="9" text-anchor="middle" font-size="7" fill="#3b82f6" font-family="monospace">OSC:UDP</text>
+        </svg>
+      </div>
+
+      <div class="card c-control">
+        <div class="card-title">映像ソフト</div>
+        <div class="card-subtitle">TouchDesigner / Hydra（差替可）</div>
+        <span class="badge">OSC受信</span>
+        <span class="badge">映像生成</span>
+      </div>
+
+    </div><!-- /row-control -->
+  </div>
+
+  <!-- ↓ 垂直矢印 -->
+  <div class="v-connector">
+    <svg width="600" height="32" viewBox="0 0 600 32">
+      <defs><marker id="vd1" markerWidth="7" markerHeight="7" refX="3.5" refY="7" orient="auto"><path d="M0,0 L3.5,7 L7,0 Z" fill="#475569"/></marker></defs>
+      <line x1="300" y1="0" x2="300" y2="28" stroke="#475569" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#vd1)"/>
+      <text x="308" y="18" font-size="9" fill="#475569" font-family="system-ui">OSC コマンド → SynthDef に伝達</text>
+    </svg>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SECTION: 音源層（Sound Sources）
+  ══════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="row-label">② 音源層 — Sound Sources（4系統）</div>
+    <div class="row-sources">
+
+      <!-- DRONE -->
+      <div class="card c-drone">
+        <div class="card-title">🌊 Drone</div>
+        <div class="card-subtitle">matoma_drone v3 — 自己組織化フィードバックネットワーク型</div>
+        <div class="chain">
+          <span class="chain-node">PinkNoise<br><small>種信号</small></span>
+          <span class="chain-arrow">→</span>
+          <span class="chain-node">LocalIn<br><small>FB入口</small></span>
+          <span class="chain-arrow">→</span>
+          <span class="chain-node">Klank×6<br><small>倍音フィルタ</small></span>
+          <span class="chain-arrow">→</span>
+          <span class="chain-node">AllpassC<br>+DelayC<br><small>自己組織化</small></span>
+          <span class="chain-arrow">→</span>
+          <span class="chain-node">HPF 40Hz<br><small>DC除去</small></span>
+          <span class="chain-arrow">→</span>
+          <span class="chain-node">LocalOut<br><small>FB出口</small></span>
+        </div>
+        <div class="chain" style="margin-top:6px">
+          <span class="chain-node">Resonz<br><small>体鳴り</small></span>
+          <span class="chain-arrow">→</span>
+          <span class="chain-node">tanh<br><small>サチュレーション</small></span>
+          <span class="chain-arrow">→</span>
+          <span class="chain-node">PitchShift<br><small>Shimmer×2</small></span>
+          <span class="chain-arrow">→</span>
+          <span class="chain-node">Env ADSR<br><small>atk 4s / rel 8s</small></span>
+          <span class="chain-arrow">→</span>
+          <span class="chain-node">FreeVerb2<br><small>最終空間</small></span>
+        </div>
+        <div style="margin-top:8px">
+          <span class="tag c-bus">→ ~droneBus</span>
+          <span class="tag c-bus">→ ~effectBus</span>
+          <span class="tag c-output">→ Out 0</span>
+        </div>
+        <div style="margin-top:6px">
+          <span class="badge">freq 20-300Hz</span>
+          <span class="badge">feedback 0-0.75</span>
+          <span class="badge">shimmer 0-1</span>
+          <span class="badge">room 0-1</span>
+        </div>
+      </div>
+
+      <!-- GRANULAR -->
+      <div class="card c-granular">
+        <div class="card-title">✨ Granular</div>
+        <div class="card-subtitle">matoma_granular v2 — Drone素材粒分解型</div>
+        <div style="font-size:9px;color:var(--text-dim);margin-bottom:8px">
+          Tim Hecker 的「残響ごと粒になる」密度
+        </div>
+        <div class="chain">
+          <span class="chain-node">~droneBus<br><small>入力</small></span>
+          <span class="chain-arrow">→</span>
+          <span class="chain-node">RecordBuf<br><small>2秒リング録音</small></span>
+          <span class="chain-arrow">→</span>
+          <span class="chain-node">GrainBuf<br><small>粒に分解</small></span>
+          <span class="chain-arrow">→</span>
+          <span class="chain-node">SelectX<br><small>Impulse↔Dust<br>spray blend</small></span>
+          <span class="chain-arrow">→</span>
+          <span class="chain-node">FreeVerb2<br><small>個別リバーブ</small></span>
+        </div>
+        <div style="margin-top:8px">
+          <span class="tag c-bus">→ ~effectBus</span>
+          <span class="tag c-output">→ Out 0</span>
+        </div>
+        <div style="margin-top:6px">
+          <span class="badge">density 5-80</span>
+          <span class="badge">spray 0-1</span>
+          <span class="badge">pos 0-1</span>
+          <span class="badge">size(秒)</span>
+        </div>
+      </div>
+
+      <!-- PERCUSSION -->
+      <div class="card c-perc">
+        <div class="card-title">🥁 Percussion</div>
+        <div class="card-subtitle">16ステップ・パーカッションシーケンサー（808スタイル）</div>
+        <div style="margin-bottom:8px">
+          <span class="badge">4 tracks × 16 steps</span>
+          <span class="badge">確率トリガー</span>
+          <span class="badge">ユークリッドリズム</span>
+        </div>
+        <div class="chain" style="flex-direction:column;gap:6px;align-items:flex-start">
+          <div style="display:flex;gap:4px;align-items:center">
+            <span class="chain-node" style="background:rgba(239,68,68,0.1);border-color:rgba(239,68,68,0.2)">matoma_perc_kick<br><small>sub + pitch sweep</small></span>
+          </div>
+          <div style="display:flex;gap:4px;align-items:center">
+            <span class="chain-node" style="background:rgba(239,68,68,0.1);border-color:rgba(239,68,68,0.2)">matoma_perc_snare<br><small>noise band + tonal</small></span>
+          </div>
+          <div style="display:flex;gap:4px;align-items:center">
+            <span class="chain-node" style="background:rgba(239,68,68,0.1);border-color:rgba(239,68,68,0.2)">matoma_perc_hihat<br><small>BPF×複数 + HPF</small></span>
+          </div>
+          <div style="display:flex;gap:4px;align-items:center">
+            <span class="chain-node" style="background:rgba(239,68,68,0.1);border-color:rgba(239,68,68,0.2)">matoma_perc_clap<br><small>4連ノイズバースト</small></span>
+          </div>
+        </div>
+        <div style="margin-top:8px;font-size:9px;color:var(--text-dim)">
+          各音源 → FreeVerb2（短め）
+        </div>
+        <div style="margin-top:4px">
+          <span class="tag c-bus">→ ~effectBus</span>
+          <span class="tag c-output">→ Out 0</span>
+        </div>
+        <div style="margin-top:6px">
+          <span class="badge">bpm</span>
+          <span class="badge">prob/step</span>
+          <span class="badge">reverse</span>
+          <span class="badge">CHAOS ENGINE</span>
+        </div>
+      </div>
+
+      <!-- RHYTHMIC -->
+      <div class="card c-rhythmic">
+        <div class="card-title">⚙️ Rhythmic</div>
+        <div class="card-subtitle">Turing Machine シーケンサー — Autechre / Alva Noto 的確率打撃</div>
+        <div style="margin-bottom:8px">
+          <span class="badge">16step シフトレジスタ</span>
+          <span class="badge">prob 0=ループ / 1=完全ランダム</span>
+        </div>
+        <div class="chain" style="flex-direction:column;gap:6px;align-items:flex-start">
+          <span class="chain-node">matoma_rhythmic_grain — GrainBuf（リズムの骨格）</span>
+          <span class="chain-node">matoma_rhythmic_klank — Impulse→Klank（金属グリッド）</span>
+          <span class="chain-node">matoma_rhythmic_fm — 高インデックスFM（予測不能）</span>
+          <span class="chain-node">matoma_rhythmic_spring — Spring+Ringz（有機的共鳴）</span>
+          <span class="chain-node">matoma_rhythmic_chaos — HenonC カオス写像（異物感）</span>
+        </div>
+        <div style="margin-top:8px;font-size:9px;color:var(--text-dim)">
+          各音源 → FreeVerb2（短め）
+        </div>
+        <div style="margin-top:4px">
+          <span class="tag c-bus">→ ~effectBus</span>
+        </div>
+      </div>
+
+    </div><!-- /row-sources -->
+  </div>
+
+  <!-- ↓ 垂直矢印 -->
+  <div class="v-connector">
+    <svg width="800" height="40" viewBox="0 0 800 40">
+      <defs>
+        <marker id="vd2" markerWidth="7" markerHeight="7" refX="3.5" refY="7" orient="auto"><path d="M0,0 L3.5,7 L7,0 Z" fill="#06b6d4"/></marker>
+        <marker id="vd3" markerWidth="7" markerHeight="7" refX="3.5" refY="7" orient="auto"><path d="M0,0 L3.5,7 L7,0 Z" fill="#06b6d4"/></marker>
+      </defs>
+      <!-- drone → droneBus (left) -->
+      <line x1="100" y1="0" x2="200" y2="36" stroke="#f97316" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#vd2)" opacity="0.5"/>
+      <!-- granular (takes from droneBus, note) -->
+      <!-- 4 sources → effectBus -->
+      <line x1="100" y1="0" x2="280" y2="36" stroke="#f97316" stroke-width="1.5" marker-end="url(#vd2)" opacity="0.7"/>
+      <line x1="280" y1="0" x2="320" y2="36" stroke="#eab308" stroke-width="1.5" marker-end="url(#vd2)" opacity="0.7"/>
+      <line x1="520" y1="0" x2="400" y2="36" stroke="#ef4444" stroke-width="1.5" marker-end="url(#vd3)" opacity="0.7"/>
+      <line x1="700" y1="0" x2="480" y2="36" stroke="#ec4899" stroke-width="1.5" marker-end="url(#vd3)" opacity="0.7"/>
+      <text x="395" y="22" text-anchor="middle" font-size="9" fill="#06b6d4" font-family="system-ui">全音源 → 共有バスへ集約</text>
+    </svg>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SECTION: 共有バス（Shared Buses）
+  ══════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="row-label">③ 共有バス — Shared Audio Buses</div>
+    <div class="row-buses">
+
+      <div class="bus-card">
+        <div class="bus-title">~droneBus</div>
+        <div class="bus-desc">ドローンのウェット信号（Shimmer Reverb後）を運ぶ専用バス</div>
+        <div class="bus-from">
+          <span class="bus-label">FROM:</span>
+          <span class="badge">Drone Out.ar(~droneBus)</span>
+        </div>
+        <div class="bus-to">
+          <span class="bus-label">TO:</span>
+          <span class="badge">Granular RecordBuf（2秒リング録音）</span>
+        </div>
+        <div style="margin-top:6px;font-size:9px;color:var(--text-dim)">
+          Droneが作った「湿った空気」をGranularが粒に分解するための素材ルート
+        </div>
+      </div>
+
+      <div class="bus-card">
+        <div class="bus-title">~effectBus</div>
+        <div class="bus-desc">全音源が送り込むグローバルエフェクト共有バス</div>
+        <div class="bus-from">
+          <span class="bus-label">FROM:</span>
+          <span class="badge">Drone</span>
+          <span class="badge">Granular</span>
+          <span class="badge">Percussion</span>
+          <span class="badge">Rhythmic</span>
+        </div>
+        <div class="bus-to">
+          <span class="bus-label">TO:</span>
+          <span class="badge">Global Delay</span>
+          <span class="badge">Spectral Freeze</span>
+          <span class="badge">Wavefolder</span>
+          <span class="badge">Feedback Loop</span>
+        </div>
+        <div style="margin-top:6px;font-size:9px;color:var(--text-dim)">
+          全音源をここに集約 → ライブ中にブラウザUIからリアルタイム操作
+        </div>
+      </div>
+
+    </div><!-- /row-buses -->
+  </div>
+
+  <!-- ↓ 垂直矢印 -->
+  <div class="v-connector">
+    <svg width="600" height="32" viewBox="0 0 600 32">
+      <defs><marker id="vd4" markerWidth="7" markerHeight="7" refX="3.5" refY="7" orient="auto"><path d="M0,0 L3.5,7 L7,0 Z" fill="#8b5cf6"/></marker></defs>
+      <line x1="300" y1="0" x2="300" y2="28" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#vd4)"/>
+      <text x="308" y="18" font-size="9" fill="#8b5cf6" font-family="system-ui">~effectBus → グローバルエフェクト直列処理</text>
+    </svg>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SECTION: エフェクト層（Effect Layer）
+  ══════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="row-label">④ エフェクト層 — Global FX Chain（直列 addToTail）</div>
+    <div class="row-effects">
+
+      <div class="effect-card">
+        <div class="effect-num">01</div>
+        <div class="effect-name">Global Delay</div>
+        <div class="effect-en">matoma_delay</div>
+        <div class="effect-params">
+          AllpassC（初期反射）<br>
+          + CombC（ロングディレイ L/R 微ずれ）<br>
+          + LocalIn/Out フィードバックループ<br>
+          <br>
+          <span class="badge">time 0〜2s</span>
+          <span class="badge">feedback 0〜0.9</span>
+          <span class="badge">mix 0〜1</span>
+        </div>
+      </div>
+
+      <div class="effect-card">
+        <div class="effect-num">02</div>
+        <div class="effect-name">Spectral Freeze</div>
+        <div class="effect-en">matoma_spectral</div>
+        <div class="effect-params">
+          FFT → PV_Freeze（凍結）<br>
+          + PV_BrickWall（ブラー）<br>
+          + IFFT（逆変換）<br>
+          LocalBuf内でFFT完結<br>
+          <br>
+          <span class="badge">freeze 0〜1</span>
+          <span class="badge">blur 0〜1</span>
+        </div>
+      </div>
+
+      <div class="effect-card">
+        <div class="effect-num">03</div>
+        <div class="effect-name">Wavefolder</div>
+        <div class="effect-en">matoma_wavefolder</div>
+        <div class="effect-params">
+          非線形フォールディングで<br>
+          倍音を追加する波形変形<br>
+          drive → tanh 系の<br>
+          サチュレーション回路<br>
+          <br>
+          <span class="badge">drive 0〜1</span>
+          <span class="badge">mix 0〜1</span>
+        </div>
+      </div>
+
+      <div class="effect-card">
+        <div class="effect-num">04</div>
+        <div class="effect-name">Feedback Loop</div>
+        <div class="effect-en">matoma_feedback</div>
+        <div class="effect-params">
+          エフェクトバス全体を<br>
+          フィードバックさせる<br>
+          「自律的エコー」層<br>
+          amount × rate で<br>
+          変化速度を制御<br>
+          <br>
+          <span class="badge">amount 0〜1</span>
+          <span class="badge">rate 0〜1</span>
+        </div>
+      </div>
+
+    </div><!-- /row-effects -->
+  </div>
+
+  <!-- ↓ 垂直矢印 -->
+  <div class="v-connector">
+    <svg width="600" height="32" viewBox="0 0 600 32">
+      <defs><marker id="vd5" markerWidth="7" markerHeight="7" refX="3.5" refY="7" orient="auto"><path d="M0,0 L3.5,7 L7,0 Z" fill="#22c55e"/></marker></defs>
+      <line x1="300" y1="0" x2="300" y2="28" stroke="#22c55e" stroke-width="2" marker-end="url(#vd5)"/>
+      <text x="308" y="18" font-size="9" fill="#22c55e" font-family="system-ui">最終ミックス → Out.ar(0) → CoreAudio</text>
+    </svg>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SECTION: 最終出力
+  ══════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="row-label">⑤ 最終出力 — Audio Output</div>
+    <div class="output-card">
+      <div class="output-icon">🔊</div>
+      <div class="output-title">スピーカー出力 — Out.ar(0)</div>
+      <div class="output-sub">CoreAudio → macOS システムデフォルト出力デバイス<br>
+        サンプルレート: ハードウェアネイティブレート（自動検出）</div>
+      <div class="port-row">
+        <span class="port-badge">CoreAudio <span>ネイティブHz（48kHz or 44.1kHz）</span></span>
+        <span class="port-badge">出力 <span>2ch ステレオ</span></span>
+        <span class="port-badge">入力 <span>0ch（マイク無効）</span></span>
+        <span class="port-badge">RTメモリ <span>128MB</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SECTION: 自律システム（Autonomous Systems）
+  ══════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="row-label">⑥ 自律システム — Autonomous / Chaos</div>
+    <div class="auto-section">
+
+      <div class="auto-card">
+        <div class="auto-title">🌀 ChaosEngine（Python）</div>
+        <div class="auto-desc">
+          Dejavu パターンによる記憶付きパラメータードリフト。<br>
+          SC 起動完了と同時に自動スタート。<br>
+          <br>
+          各パラメーターに <strong>引力点（Attractor）</strong> を設定し、<br>
+          カオスの振れ幅は <strong>カオス幅エンベロープ</strong> で長期制御。<br>
+          「完全ランダム」でも「固定スコア」でもない第三の状態。<br>
+          <br>
+          <span class="badge">→ Drone: freq, feedback_amt, shimmer, room</span>
+          <span class="badge">→ Granular: density, spray, pos, size</span>
+        </div>
+      </div>
+
+      <div class="auto-card">
+        <div class="auto-title">⚡ TuringMachine（SC内）</div>
+        <div class="auto-desc">
+          16ステップ・シフトレジスタがリズムパターンを確率的に進化。<br>
+          <br>
+          <strong>prob=0.0</strong> → 完全ループ（ミニマル）<br>
+          <strong>prob=0.5</strong> → 徐々に変化（Autechre的・最も音楽的）<br>
+          <strong>prob=1.0</strong> → 完全ランダム（崩壊）<br>
+          <br>
+          Rhythmic の5音源（Grain/Klank/FM/Spring/Chaos）に<br>
+          「どの音源を・いつ・どんな音程で叩くか」を確率的に配分。
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SECTION: シグナルフロー全体図（テキスト）
+  ══════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="row-label">全体シグナルフロー — Summary</div>
+    <div class="card" style="background: #0d1117; border-color: #1e2430;">
+      <pre style="font-size:11px; font-family:'SF Mono','Fira Code',monospace; color: var(--text-xs); line-height:1.8; overflow-x:auto;">
+<span style="color:#f97316">  [Drone]</span>  PinkNoise → Klank×6 → AllpassC/DelayC → Resonz → tanh → PitchShift
+      │         └→ <span style="color:#06b6d4">~droneBus</span> ─────────────────────────────────────┐
+      └→ FreeVerb2 → <span style="color:#06b6d4">~effectBus</span>                                      │
+                                                                        ▼
+<span style="color:#eab308">  [Granular]</span> <span style="color:#06b6d4">~droneBus</span> → RecordBuf(2s) → GrainBuf → SelectX(spray) → FreeVerb2
+      └→ <span style="color:#06b6d4">~effectBus</span>
+
+<span style="color:#ef4444">  [Percussion]</span> Kick/Snare/HiHat/Clap × 16steps × prob → FreeVerb2
+      └→ <span style="color:#06b6d4">~effectBus</span>
+
+<span style="color:#ec4899">  [Rhythmic]</span> TuringMachine → Grain/Klank/FM/Spring/Chaos → FreeVerb2
+      └→ <span style="color:#06b6d4">~effectBus</span>
+
+<span style="color:#06b6d4">  ~effectBus</span> ──→ <span style="color:#8b5cf6">[Delay]</span> → <span style="color:#8b5cf6">[Spectral]</span> → <span style="color:#8b5cf6">[Wavefolder]</span> → <span style="color:#8b5cf6">[Feedback]</span>
+                                                                        │
+                                                         ───────────────┘
+                                                         ▼
+                                                 <span style="color:#22c55e">Out.ar(0) → 🔊 スピーカー</span>
+      </pre>
+    </div>
+  </div>
+
+</div><!-- /arch-wrap -->
+
+<script>
+  // tooltip on hover for chain-nodes
+  document.querySelectorAll('.chain-node').forEach(el => {
+    el.title = el.textContent.trim().replace(/\s+/g, ' ');
+  });
+
+  // Animate bus flow direction randomly to give "live" feel
+  const busBefores = document.querySelectorAll('.bus-card');
+  busBefores.forEach((card, i) => {
+    card.style.setProperty('--delay', (i * 0.7) + 's');
+  });
+</script>
+</body>
+</html>

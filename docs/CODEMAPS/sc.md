@@ -1,16 +1,19 @@
-<!-- Generated: 2026-03-29 | Files scanned: sc/*.scd | Token estimate: ~450 -->
+<!-- Generated: 2026-03-29 | Files scanned: sc/*.scd (9ファイル) | Token estimate: ~750 -->
 # SuperCollider Architecture
 
 ## ファイル構成
 
 ```
 sc/
-├── run_headless.scd   — 起動スクリプト・全モジュールロード
-├── drone.scd          — ドローン定義 (Ndef)
-├── granular.scd       — グラニュラーサンプラー
-├── synth.scd          — FMシンセ SynthDef
-├── ambient.scd        — アンビエントパッド
-└── test_sender.scd    — OSCテスト送信ユーティリティ
+├── run_headless.scd  (1121行) — 起動スクリプト・全モジュールロード・OSCdef登録
+├── drone.scd          (219行) — ドローン SynthDef v3 (自己組織化フィードバック)
+├── granular.scd       (241行) — グラニュラーサンプラー Ndef
+├── synth.scd           (97行) — FMシンセ SynthDef
+├── ambient.scd        (135行) — アンビエントパッド Ndef
+├── effects.scd        (366行) — スペクトル処理 + グローバルエフェクトチェーン
+├── rhythmic.scd       (438行) — Turing Machineシーケンサー
+├── percussion.scd     (764行) — ドラム SynthDef 群 + 22個の OSCdef
+└── test_sender.scd     (50行) — OSCテスト送信ユーティリティ
 ```
 
 ## 起動シーケンス (run_headless.scd)
@@ -18,13 +21,14 @@ sc/
 ```
 1. UDPポート 57200 を開く (MaToMa専用)
 2. メモリ拡張: s.options.memSize = 131072 (128MB)
-3. SynthDef/Ndef の定義 (各 .scd ファイルをロード)
-4. OSCdef の登録 (Python からのコマンド受信)
-5. 起動確認音: 880Hz ビープ音
-6. /matoma/ready を Python へ送信
+3. 出力デバイス設定を audio_device.txt から読み込み
+4. SynthDef/Ndef の定義 (各 .scd ファイルをロード)
+5. OSCdef の登録 (Python からのコマンド受信)
+6. 起動確認音: 880Hz ビープ音
+7. /matoma/ready を Python (port 9000) へ送信
 ```
 
-## SynthDef: matoma_basic (FM合成)
+## SynthDef: matoma_basic (synth.scd / FM合成)
 
 ```
 Parameters:
@@ -44,7 +48,7 @@ Signal Chain:
                                      Out
 ```
 
-## Ndef(\drone) (ドローン・アンビエント)
+## SynthDef: matoma_drone v3 (drone.scd / 自己組織化フィードバック)
 
 ```
 Parameters:
@@ -58,46 +62,78 @@ Parameters:
   breathe  = 0.55     振幅変調深さ
 
 Signal Chain:
-  LFSaw × 5本 (各周波数=freq × [1,1+detune, 0.5, 2, 1+detune/2])
-    ↓ Mix
-  LFO (drift Hz, SinOsc) → RLPF cutoff変調
-  LFO (1/12Hz, SinOsc)   → Breathe (振幅変調)
+  FreqShift + DelayC + AllpassC (フィードバックネットワーク)
     ↓
-  GVerb (room, revtime)
+  Klank (6倍音) + Resonz (温かみ)
+    ↓
+  LFO (drift Hz) → RLPF cutoff変調
+  LFO (1/12Hz)   → Breathe (振幅変調)
+    ↓
+  PitchShift Shimmer
+    ↓
+  FreeVerb2 + GVerb (room, revtime)
     ↓
   Out
+```
+
+## Ndef(\granular) (granular.scd)
+
+```
+GrainSin / TGrains を使用
+Parameters:
+  pos     0-1    再生位置
+  density 1-50   グレイン/秒
+  spread  0-1    ピッチばらつき
+  amp     0-1
+フィードバック: /matoma/granular/density → Python → ブラウザ表示
+```
+
+## Ndef(\ambient) (ambient.scd)
+
+```
+Signal Chain:
+  Saw × 5本 (detuned unison)
+    ↓ LFO変調
+  RLPF → GVerb
+```
+
+## Ndef(\spectral) (effects.scd)
+
+```
+PV_MagSmear (smear 0.1-0.9) — 周波数成分をぼかす
+PV_Diffuser (chaos 0.1-0.8) — 位相をランダム化
+グローバルエフェクトチェーンも含む
+```
+
+## rhythmic.scd — Turing Machineシーケンサー
+
+```
+16ステップ固定
+mutation_prob — ステップ値の変異確率
+trig_prob     — トリガー発火確率
+OSCdef でBPM・div・各ステップON/OFF・パラメーター制御
+```
+
+## percussion.scd — ドラムシンセ群
+
+```
+SynthDef:
+  \matoma_perc_kick   — キックドラム
+  \matoma_perc_snare  — スネア
+  \matoma_perc_hihat  — ハイハット
+  \matoma_perc_clap   — クラップ
+  (その他パーカッション要素)
+22個のOSCdefで各素子を個別制御
 ```
 
 ## OSCdef 一覧 (Python → SC)
 
 ```
-\matoma_param       /matoma/param       [key, val] → ~currentSynth.set(key, val)
-\matoma_drone       /matoma/drone/param [key, val] → Ndef(\drone).set(key, val)
-\matoma_granular    /matoma/granular/param [key, val] → Ndef(\granular).set(key, val)
-\matoma_gran_load   /matoma/granular/load  [path]    → Buffer.read(path)
-\matoma_spectral    /matoma/spectral/param [key, val] → Ndef(\spectral).set(key, val)
-```
-
-## グラニュラー (granular.scd)
-
-```
-Ndef(\granular):
-  GrainSin / TGrains を使用
-  Parameters:
-    pos     0-1    再生位置
-    density 1-50   グレイン/秒
-    spread  0-1    ピッチばらつき
-    amp     0-1
-  フィードバック: /matoma/granular/density → Python → ブラウザ表示
-```
-
-## スペクトル (spectral.scd or run_headless.scd)
-
-```
-Ndef(\spectral):
-  PV_MagSmear (smear)  — 周波数成分をぼかす
-  PV_Diffuser (chaos)  — 位相をランダム化
-  Parameters:
-    smear  0.1-0.9
-    chaos  0.1-0.8
+\matoma_param       /matoma/param            [key, val] → currentSynth.set(key, val)
+\matoma_drone       /matoma/drone/param      [key, val] → SynthDef(\matoma_drone).set()
+\matoma_granular    /matoma/granular/param   [key, val] → Ndef(\granular).set(key, val)
+\matoma_gran_load   /matoma/granular/load    [path]     → Buffer.read(path)
+\matoma_spectral    /matoma/spectral/param   [key, val] → Ndef(\spectral).set(key, val)
+\matoma_scene       /matoma/scene            [name]     → シーン別パラメーター一括設定
+(+ percussion.scd 内 22個のOSCdef)
 ```

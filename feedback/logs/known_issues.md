@@ -7,17 +7,42 @@
 
 ## 🔇 音が出ない問題
 
+### 問題X: MaToMa起動時に他アプリ（Spotify, Music.app等）の音が止まる【根本原因特定済み】
+
+**症状:** `./start.sh` を実行すると、他の音楽アプリの音が止まり、再生しても音が出なくなる
+**根本原因（2軸）:**
+
+**原因A: サンプルレート強制 (最重要)**
+  - 旧コード `s.options.sampleRate = 44100;` がZoom/外部IFの影響で48kHzになったシステムに対し
+    44100Hzを強制 → CoreAudioがデバイスをリセット → 全アプリの音声ストリーム中断
+
+**原因B: inputStreamsEnabled="0" の誤解釈**
+  - 旧コード `s.options.inputStreamsEnabled = "0"` は「ストリーム0のみ無効、それ以外は有効」の意味
+  - つまり入力の完全無効化にはなっていなかった（意図した効果を発揮していなかった）
+
+**修正内容（2026-03-29）:**
+  - `s.options.sampleRate = 44100` → 削除（nil=ハードウェアネイティブレートを使用）
+  - `s.options.inputStreamsEnabled = "0"` → 削除（`numInputBusChannels = 0` のみで十分）
+  - 起動ログに実際のサンプルレートを表示するように追加
+
+**確認方法:** `./start.sh` 後のログに `実際のサンプルレート: XXXXX Hz` が表示される。
+この値がシステムのサンプルレートと一致していれば正常（Audio MIDI設定.app で確認可）
+
+---
+
 ### 問題0: SCがZoom/rekordbox仮想デバイスに出力している【最頻出】
 
 **症状:** ブリッジログに「テスト音再生」は出るが全く音が聞こえない
 **原因:** ZoomAudioDevice または rekordbox Aggregate Device がSCのデフォルト出力になっている
-**解決策:**
+**解決策（UIから）:** GUIの「AUDIO DEVICE」セレクターで正しいデバイスを選択 → 次回以降は自動適用
+**解決策（CLIから）:**
 ```bash
 echo -n "MacBook Proのスピーカー" > backend/audio_device.txt
 ./start.sh
 ```
-ログに `出力デバイス: MacBook Proのスピーカー` と出れば正しい
-**ステータス:** 2026-03-29 audio_device.txt の仕組みで恒久対応済み
+ログに `保存済みオーディオデバイスを適用: 'MacBook Proのスピーカー'` と出れば正しい
+**ステータス:** 2026-03-29 bridge.py の起動時適用 + UIからの永続保存 で恒久対応済み
+**注:** 旧「ステータス済み」はコードに反映されていなかったバグ（2026-03-29修正）
 
 ---
 

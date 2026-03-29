@@ -28,10 +28,11 @@ from pathlib import Path
 
 try:
     import anthropic
+    from anthropic.types import TextBlock
     import websockets
 except ImportError:
-    print("依存ライブラリが不足しています。以下を実行してください:")
-    print("  pip install anthropic websockets")
+    print("依存ライブラリが不足しています。以下を実行してください:", file=sys.stderr)
+    print("  pip install anthropic websockets", file=sys.stderr)
     sys.exit(1)
 
 # プロジェクトルートをパスに追加してknowledgeモジュールを使えるようにする
@@ -99,13 +100,15 @@ async def get_current_state() -> dict:
     """ブリッジから現在のTidal状態を取得する。"""
     try:
         async with websockets.connect(WS_URL, open_timeout=2) as ws:
-            await ws.send(json.dumps({"address": "/matoma/tidal/state", "args": []}))
+            await ws.send(json.dumps(
+                {"address": "/matoma/tidal/state", "args": []}
+            ))
             reply = await asyncio.wait_for(ws.recv(), timeout=2.0)
             data = json.loads(reply)
             if data.get("type") == "tidal_state":
                 return data.get("state", {})
     except Exception:
-        pass
+        pass  # ブリッジ未起動時はデフォルト値を返す
     # デフォルト値
     return {
         "tempo_bpm": 120,
@@ -134,8 +137,8 @@ async def send_to_bridge(tidal_code: str) -> bool:
                 pass
         return True  # 送信完了（確認なし）
     except ConnectionRefusedError:
-        print("エラー: ブリッジ（bridge.py）が起動していません。")
-        print("  python backend/bridge.py  で起動してください。")
+        print("エラー: ブリッジ（bridge.py）が起動していません。", file=sys.stderr)
+        print("  python backend/bridge.py  で起動してください。", file=sys.stderr)
         return False
     except Exception as e:
         print(f"エラー: {e}")
@@ -180,7 +183,10 @@ def translate_with_claude(prompt: str, current_state: dict) -> str:
         system=system,
         messages=[{"role": "user", "content": prompt}],
     )
-    return message.content[0].text.strip()
+    block = message.content[0]
+    if not isinstance(block, TextBlock):
+        raise ValueError(f"予期しないレスポンス型: {type(block)}")
+    return block.text.strip()
 
 
 async def main() -> None:
@@ -220,11 +226,11 @@ async def main() -> None:
         parser.print_help()
         sys.exit(1)
 
-    print(f"Claude に翻訳を依頼中...")
+    print("Claude に翻訳を依頼中...")
     current_state = await get_current_state()
     tidal_code = translate_with_claude(args.prompt, current_state)
 
-    print(f"\n生成されたTidalコード:")
+    print("\n生成されたTidalコード:")
     print("-" * 40)
     print(tidal_code)
     print("-" * 40)
