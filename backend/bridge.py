@@ -14,17 +14,46 @@ import json
 import logging
 import os
 import shutil
+import signal
 import subprocess
+import tempfile
+import uuid
 from pathlib import Path
 
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import AsyncIOOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
+
+
+def get_audio_output_devices() -> list[str]:
+    """
+    macOS の system_profiler から出力チャンネルを持つオーディオデバイス名を取得する。
+    SC の OSC 経由では日本語名が途切れるため、Python 側で直接取得する。
+    """
+    try:
+        r = subprocess.run(
+            ["system_profiler", "SPAudioDataType", "-json"],
+            capture_output=True, text=True, timeout=5,
+        )
+        data = json.loads(r.stdout)
+        items = data.get("SPAudioDataType", [{}])[0].get("_items", [])
+        return [
+            item["_name"]
+            for item in items
+            if item.get("coreaudio_device_output", 0) > 0
+        ]
+    except Exception as e:
+        log.warning(f"オーディオデバイス取得失敗: {e}")
+        return []
 import websockets
 from scenes import get_scene, scene_to_osc_messages
-from autonomous import AutonomousMode
+from autonomous import AutonomousMode, ChaosEngine
 from tidal_controller import TidalController
-from tidal_patterns import make_chord_pattern, make_arp_pattern
+from tidal_patterns import make_chord_pattern, make_arp_pattern, make_drum_pattern
+from sequencer import TuringSequencer
+
+# ── PID ファイル ─────────────────────────────────────────
+PID_FILE = Path(__file__).parent / ".bridge.pid"
 
 # ── ポート設定 ──────────────────────────────────────────
 OSC_LISTEN_HOST = "127.0.0.1"
@@ -50,8 +79,14 @@ sc_client = SimpleUDPClient(SC_HOST, SC_PORT)
 # 自律モード（broadcast は後で関数参照として渡す）
 autonomous: AutonomousMode
 
+# カオスエンジン（Dejavu パターンによる記憶付きドリフト）
+chaos_engine: ChaosEngine
+
 # Tidal Cycles コントローラー
 tidal: TidalController
+
+# Turing Machine ステップシーケンサー
+sequencer: TuringSequencer
 
 # SC プロセス
 sc_process = None
@@ -166,16 +201,66 @@ def on_osc_message(address: str, *args) -> None:
     """SCからのOSCメッセージを受け取りブラウザへ転送する。"""
     global sc_ready
 
+    if address == "/matoma/audio/devices":
+        # SC からの音声デバイスリストは日本語名が途切れるため、
+        # デバイスリストは Python 側で system_profiler から取得する。
+        # current_device（SC が起動時に使ったデバイス名）は参考として受け取る。
+        config_path = Path(__file__).parent / "audio_device.txt"
+        current_device = config_path.read_text(encoding="utf-8").strip() if config_path.exists() else ""
+        devices = get_audio_output_devices()
+        log.info(f"音声デバイスリスト(Python取得): current={current_device!r} devices={devices}")
+        asyncio.get_running_loop().create_task(
+            broadcast({
+                "type": "audio_devices",
+                "current": current_device,
+                "devices": devices,
+            })
+        )
+        return
+
     if address == "/matoma/ready":
         sc_ready = True
         log.info("SC ready 受信 → ブラウザへ通知")
-        asyncio.get_event_loop().create_task(
+        # SC 起動完了と同時に ChaosEngine を自動スタート
+        # （これがないとパラメーターが一切変化しない）
+        chaos_engine.start()
+        log.info("ChaosEngine 自動スタート")
+        asyncio.get_running_loop().create_task(
             broadcast({"type": "sc_ready", "message": "SC起動完了"})
         )
         return
 
+    if address == "/matoma/granular/not_ready":
+        log.warning("グラニュラー: バッファ未ロード状態でSTARTが押されました")
+        asyncio.get_running_loop().create_task(
+            broadcast({
+                "type": "granular_load_error",
+                "message": "バッファ未ロード。先にファイルを選択してください",
+            })
+        )
+        return
+
+    if address == "/matoma/granular/loaded":
+        path = str(args[0]) if args else ""
+        num_frames = int(args[1]) if len(args) > 1 else 0
+        sample_rate = float(args[2]) if len(args) > 2 else 44100.0
+        duration = (
+            round(num_frames / sample_rate, 2) if sample_rate > 0 else 0.0
+        )
+        log.info(f"グラニュラーロード完了: {path} ({duration}s)")
+        asyncio.get_running_loop().create_task(
+            broadcast({
+                "type": "granular_loaded",
+                "path": path,
+                "num_frames": num_frames,
+                "sample_rate": sample_rate,
+                "duration": duration,
+            })
+        )
+        return
+
     log.info(f"OSC受信: {address}  args={args}")
-    asyncio.get_event_loop().create_task(
+    asyncio.get_running_loop().create_task(
         broadcast({"address": address, "args": list(args)})
     )
 
@@ -198,6 +283,10 @@ async def ws_handler(websocket) -> None:
         "message": "SC起動完了" if sc_ready else "SC未起動",
     }))
 
+    # SC が起動済みならデバイスリストを要求する
+    if sc_ready:
+        sc_client.send_message("/matoma/audio/get_devices", [])
+
     try:
         async for raw in websocket:
             try:
@@ -212,10 +301,61 @@ async def ws_handler(websocket) -> None:
                     if scene:
                         for osc in scene_to_osc_messages(scene):
                             sc_client.send_message(osc["address"], osc["args"])
+                        # ChaosEngine の引力点をシーンに合わせて更新する
+                        chaos_engine.set_scene(scene)
                         await broadcast({"type": "scene_changed", "scene": scene})
                         log.info(f"シーン切り替え: {scene_name}")
                     else:
                         log.warning(f"シーンが見つかりません: {scene_name}")
+
+                elif address == "/matoma/chaos/state":
+                    # カオスエンジンの現在状態をブラウザへ送る
+                    await broadcast({
+                        "type": "chaos_state",
+                        "state": chaos_engine.get_state(),
+                    })
+
+                elif address == "/matoma/all/stop":
+                    chaos_engine.stop()
+                    autonomous.stop()
+                    sc_client.send_message("/matoma/all/stop", [])
+                    log.info("全停止")
+                    await broadcast({"type": "all_stopped"})
+
+                elif address == "/matoma/all/restart":
+                    chaos_engine.stop()
+                    autonomous.stop()
+                    sc_client.send_message("/matoma/all/restart", [])
+                    log.info("再セットアップ")
+                    await broadcast({"type": "restarting"})
+
+                elif address == "/matoma/chaos/attractor":
+                    # 引力点を手動で設定する
+                    # args: [layer, param, attractor, range_opt]
+                    if len(args) >= 3:
+                        layer_name = str(args[0])
+                        param_name = str(args[1])
+                        attractor_val = float(args[2])
+                        range_val = float(args[3]) if len(args) >= 4 else None
+                        chaos_engine.set_attractor(
+                            layer_name, param_name, attractor_val, range_val
+                        )
+                        log.info(
+                            f"引力点設定: {layer_name}/{param_name}"
+                            f" → {attractor_val} (range={range_val})"
+                        )
+
+                elif address == "/matoma/chaos/start":
+                    # カオスエンジンを開始する
+                    chaos_engine.start()
+                    log.info("ChaosEngine 開始")
+                    await broadcast({"type": "chaos_started"})
+
+                elif address == "/matoma/chaos/stop":
+                    # カオスエンジンを停止する
+                    chaos_engine.stop()
+                    log.info("ChaosEngine 停止")
+                    await broadcast({"type": "chaos_stopped"})
 
                 elif address.startswith("/matoma/autonomous/"):
                     # 自律モードの制御
@@ -242,12 +382,52 @@ async def ws_handler(websocket) -> None:
                     elif sub == "progression" and args:
                         autonomous.set_progression(str(args[0]))
                         log.info(f"コード進行変更: {args[0]}")
+                    elif sub == "trig_prob" and args:
+                        autonomous.set_trig_prob(float(args[0]))
+                        log.info(f"TRIG確率: {args[0]}")
+                    elif sub == "dejavu_prob" and args:
+                        autonomous.set_dejavu_prob(float(args[0]))
+                        log.info(f"Dejavu確率: {args[0]}")
+                    elif sub == "dejavu_len" and args:
+                        autonomous.set_dejavu_len(int(args[0]))
+                        log.info(f"Dejavu長さ: {args[0]}")
+
+                elif address == "/matoma/audio/get_devices":
+                    # デバイスリストは Python 側で取得（SC OSC 経由では名前が途切れるため）
+                    config_path = Path(__file__).parent / "audio_device.txt"
+                    current_device = config_path.read_text(encoding="utf-8").strip() if config_path.exists() else ""
+                    devices = get_audio_output_devices()
+                    log.info(f"デバイスリスト要求(Python取得): current={current_device!r} devices={devices}")
+                    await broadcast({
+                        "type": "audio_devices",
+                        "current": current_device,
+                        "devices": devices,
+                    })
+
+                elif address == "/matoma/audio/set_device":
+                    device_name = str(args[0]) if args else ""
+                    config_path = Path(__file__).parent / "audio_device.txt"
+                    config_path.write_text(device_name, encoding="utf-8")
+                    log.info(f"音声デバイス設定を保存: {device_name!r}")
+                    await broadcast({
+                        "type": "sc_booting",
+                        "message": f"デバイス「{device_name or 'デフォルト'}」へ切替のため SC を再起動中...",
+                    })
+                    asyncio.create_task(start_sc())
 
                 elif address.startswith("/matoma/tidal/"):
                     await _handle_tidal(address, args, websocket)
 
                 elif address == "/matoma/granular/browse":
                     await _handle_granular_browse(websocket)
+
+                elif address.startswith("/matoma/seq/"):
+                    await _handle_seq(address, args, websocket)
+
+                elif address.startswith("/matoma/spectral/"):
+                    # スペクトルシンセはそのままSCへ転送する
+                    sc_client.send_message(address, args)
+                    log.info(f"Spectral SCへ転送: {address}  args={args}")
 
                 else:
                     # 手動スライダー操作時に自律モードの現在値を同期する
@@ -273,7 +453,7 @@ async def _handle_tidal(address: str, args: list, websocket) -> None:
     sub = address[len("/matoma/tidal/"):]
 
     if sub == "start":
-        ok = await asyncio.get_event_loop().run_in_executor(None, tidal.start)
+        ok = await asyncio.get_running_loop().run_in_executor(None, tidal.start)
         reply = {
             "type": "tidal_started" if ok else "tidal_error",
             "message": (
@@ -284,7 +464,7 @@ async def _handle_tidal(address: str, args: list, websocket) -> None:
         await broadcast(reply)
 
     elif sub == "stop":
-        await asyncio.get_event_loop().run_in_executor(None, tidal.stop)
+        await asyncio.get_running_loop().run_in_executor(None, tidal.stop)
         await broadcast({"type": "tidal_stopped"})
 
     elif sub == "hush":
@@ -339,6 +519,98 @@ async def _handle_tidal(address: str, args: list, websocket) -> None:
             json.dumps({"type": "tidal_state", "state": tidal.state})
         )
 
+    elif sub == "drums":
+        # args: [preset, kick_gain, snare_gain, hat_gain, speed]
+        preset     = str(args[0]) if len(args) > 0 else "minimal"
+        kick_gain  = float(args[1]) if len(args) > 1 else 0.9
+        snare_gain = float(args[2]) if len(args) > 2 else 0.7
+        hat_gain   = float(args[3]) if len(args) > 3 else 0.5
+        speed      = float(args[4]) if len(args) > 4 else 1.0
+        codes = make_drum_pattern(3, 4, 5, preset, kick_gain, snare_gain, hat_gain, speed)
+        for code in codes:
+            tidal.evaluate(code)
+        combined = "\n".join(codes)
+        log.info(f"ドラムパターン送信: {preset}")
+        await broadcast({"type": "tidal_applied", "code": combined})
+
+    elif sub == "drums_stop":
+        # ドラムトラック (d3, d4, d5) を停止
+        for track in [3, 4, 5]:
+            tidal.evaluate(f"d{track} $ silence")
+        await broadcast({"type": "tidal_applied", "code": "d3..d5 silence"})
+
+
+async def _handle_seq(address: str, args: list, websocket) -> None:
+    """シーケンサー関連の WebSocket メッセージを処理する。"""
+    sub = address[len("/matoma/seq/"):]
+
+    if sub == "start":
+        sequencer.start()
+        await broadcast({"type": "seq_state", "state": sequencer.get_state()})
+        log.info("シーケンサー開始")
+
+    elif sub == "stop":
+        sequencer.stop()
+        await broadcast({"type": "seq_state", "state": sequencer.get_state()})
+        log.info("シーケンサー停止")
+
+    elif sub == "bpm" and args:
+        sequencer.set_bpm(float(args[0]))
+        log.info(f"seq BPM: {args[0]}")
+
+    elif sub == "step_div" and args:
+        sequencer.set_step_div(str(args[0]))
+        log.info(f"seq step_div: {args[0]}")
+
+    elif sub == "trig_prob" and args:
+        sequencer.set_trig_prob(float(args[0]))
+
+    elif sub == "mutation" and args:
+        sequencer.set_mutation_prob(float(args[0]))
+        log.info(f"seq mutation: {args[0]}")
+
+    elif sub == "step_enabled" and len(args) >= 2:
+        sequencer.set_step_enabled(int(args[0]), bool(args[1]))
+
+    elif sub == "active_params" and args:
+        sequencer.set_active_params(list(args))
+        log.info(f"seq active_params: {args}")
+
+    elif sub == "state":
+        await websocket.send(
+            json.dumps({"type": "seq_state", "state": sequencer.get_state()})
+        )
+
+
+async def _convert_mp3_to_wav(src_path: str) -> str | None:
+    """MP3をWAVに変換してパスを返す。ffmpegが必要。失敗時はNoneを返す。"""
+    tmp_wav = Path(tempfile.gettempdir()) / f"matoma_{uuid.uuid4().hex}.wav"
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: subprocess.run(
+                [
+                    "ffmpeg", "-y", "-i", src_path,
+                    "-ar", "44100", "-ac", "1", str(tmp_wav),
+                ],
+                capture_output=True,
+                timeout=60,
+            ),
+        )
+        if result.returncode == 0:
+            return str(tmp_wav)
+        stderr_head = result.stderr.decode(errors="replace")[:200]
+        log.warning(
+            f"ffmpeg変換失敗 (code={result.returncode}): {stderr_head}"
+        )
+        return None
+    except FileNotFoundError:
+        log.warning("ffmpegが見つかりません。MP3を読み込むにはffmpegをインストールしてください。")
+        return None
+    except Exception as e:
+        log.warning(f"MP3変換エラー: {e}")
+        return None
+
 
 async def _handle_granular_browse(websocket) -> None:
     """macOSのファイル選択ダイアログを開き、選ばれたパスをブラウザへ返す。"""
@@ -347,7 +619,7 @@ async def _handle_granular_browse(websocket) -> None:
         'with prompt "グラニュラー音源ファイルを選択してください")'
     )
     try:
-        result = await asyncio.get_event_loop().run_in_executor(
+        result = await asyncio.get_running_loop().run_in_executor(
             None,
             lambda: subprocess.run(
                 ["osascript", "-e", script],
@@ -357,32 +629,82 @@ async def _handle_granular_browse(websocket) -> None:
             ),
         )
         path = result.stdout.strip()
-        if path:
-            log.info(
-                f"グラニュラー音源選択: {path}  接続数={len(connected_clients)}"
-            )
-            await websocket.send(
-                json.dumps({"type": "granular_file_selected", "path": path})
-            )
-            sc_client.send_message("/matoma/granular/load", [path])
-        else:
+        if not path:
             log.info("ファイル選択がキャンセルされました")
+            return
+
+        log.info(f"グラニュラー音源選択: {path}  接続数={len(connected_clients)}")
+
+        # ファイル選択をブラウザへ通知（ロード中として表示させる）
+        await websocket.send(
+            json.dumps({"type": "granular_file_selected", "path": path})
+        )
+
+        # MP3の場合はffmpegでWAVに変換してからSCへ送る
+        sc_load_path = path
+        if path.lower().endswith(".mp3"):
+            log.info("MP3を検出 → ffmpegでWAVに変換中...")
+            converted = await _convert_mp3_to_wav(path)
+            if converted:
+                sc_load_path = converted
+                log.info(f"変換完了: {sc_load_path}")
+            else:
+                await broadcast({
+                    "type": "granular_load_error",
+                    "message": (
+                        "MP3変換失敗。"
+                        "ffmpegをインストールしてください（brew install ffmpeg）"
+                    ),
+                })
+                return
+
+        sc_client.send_message("/matoma/granular/load", [sc_load_path])
     except Exception as e:
         log.warning(f"ファイル選択ダイアログエラー: {e}")
 
 
+def _acquire_pid_lock() -> None:
+    """
+    PIDファイルを使って旧インスタンスを停止し、自分のPIDを登録する。
+    これにより複数の bridge.py が同時に動くことを防ぐ。
+    """
+    if PID_FILE.exists():
+        try:
+            old_pid = int(PID_FILE.read_text().strip())
+            os.kill(old_pid, signal.SIGTERM)
+            log.info(f"旧 bridge.py (PID={old_pid}) を停止しました")
+        except (ValueError, ProcessLookupError, PermissionError):
+            pass  # 既に終了済みまたは無効なPID
+    PID_FILE.write_text(str(os.getpid()))
+    log.info(f"PIDファイル書き込み: {PID_FILE} (PID={os.getpid()})")
+
+
+def _release_pid_lock() -> None:
+    """終了時にPIDファイルを削除する。"""
+    try:
+        if PID_FILE.exists() and PID_FILE.read_text().strip() == str(os.getpid()):
+            PID_FILE.unlink()
+    except OSError:
+        pass
+
+
 async def main() -> None:
     """OSCサーバーとWebSocketサーバーを同時に起動する。"""
-    global autonomous, tidal
+    global autonomous, chaos_engine, tidal, sequencer
+
+    _acquire_pid_lock()
+    await asyncio.sleep(0.8)  # 旧プロセスの終了を待つ（イベントループをブロックしない）
 
     autonomous = AutonomousMode(sc_client.send_message, broadcast)
+    chaos_engine = ChaosEngine(sc_client.send_message, broadcast)
     tidal = TidalController()
     autonomous.set_tidal(tidal)
+    sequencer = TuringSequencer(sc_client.send_message, broadcast)
 
     disp = Dispatcher()
     disp.set_default_handler(on_osc_message)
     osc_server = AsyncIOOSCUDPServer(
-        (OSC_LISTEN_HOST, OSC_LISTEN_PORT), disp, asyncio.get_event_loop()
+        (OSC_LISTEN_HOST, OSC_LISTEN_PORT), disp, asyncio.get_running_loop()
     )
     transport, _ = await osc_server.create_serve_endpoint()
 
@@ -402,6 +724,7 @@ async def main() -> None:
         ws_server.close()
         if sc_process and sc_process.returncode is None:
             sc_process.terminate()
+        _release_pid_lock()
 
 
 if __name__ == "__main__":

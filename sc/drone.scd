@@ -1,150 +1,166 @@
 /*
-MaToMa: アンビエント・ドローンモジュール
-==========================================
-複数のサイン波をゆっくり揺らし続ける、持続する音の空間。
-LFOがcutoff（音の明るさ）を自律的にゆっくり動かし続ける。
+MaToMa: アンビエント・ドローンモジュール（v2 — 共鳴育成型）
+================================================================
+【設計思想】
+  「発振器から描く」ではなく「共鳴から育てる」。
+  PinkNoise（自然界の背景雑音）を Klank（倍音フィルターバンク）に通すことで、
+  楽器の胴体が共鳴するような「自然に育つ音」を生成する。
 
-【音の仕組みのイメージ】
-  ・ドローン = 低音を長く伸ばし、少しずつ変化させる「地面のような音」
-  ・4本の音をわずかにずらして重ねる（デチューン）→ 揺れる・太い音に
-  ・LFO = 「ゆっくり揺れる波」。呼吸するように cutoff を上下させる
-  ・drift を上げるほど、誰も触らなくても音が変化し続ける（自律モード）
+【シグナルチェーンのイメージ】
+  PinkNoise（雑音の種）
+    → Klank（倍音バンク：胴鳴り）    … 音色と質感を同時に形成
+    → LocalIn/LocalOut フィードバック … 倍音が自己生成・増幅する
+    → tanh サチュレーション           … 温かみと倍音の密度
+    → Shimmer Reverb（PitchShift）   … リバーブ尾部をオクターブ上に戻す→浮遊感
+    → ~droneBus（ウェット信号バス）   … Granularがここから素材を読む
+    → FreeVerb2 / GVerb              … 最終空間演出
+    → Out
 
 【パラメーター】
-  freq   : 根音の高さ（Hz）。40=超低域、60=低域、110=中低域
-  detune : 音の揺らぎ・厚み（0.0〜1.0）。大きいほど太くゆったりした音
-  cutoff : 音の明るさの基準値（Hz）。低い=暗い・こもった、高い=明るい・開いた
-  drift  : LFOの速度と深度（0.0〜1.0）。0=ほぼ静止、1=大きく・速く揺れる
-  room   : 空間の広さ・残響（0.0〜1.0）。大きいほど洞窟のような広がり
-  amp    : 音量（0.0〜1.0）
+  freq         : 共鳴の基本周波数（Hz）。40=超低域、60=低域、110=中低域
+  feedback_amt : 内部フィードバック量（0.0〜0.5）。大きいほど倍音が自己生成する
+  shimmer      : シマーリバーブのミックス量（0.0〜1.0）。浮遊感の強さ
+  room         : 個別リバーブのroom size（0.0〜1.0）
+  amp          : 音量（0.0〜1.0）
+  gate         : エンベロープゲート（1=持続、0=フェードアウト）
 
 【OSCアドレス】
-  /matoma/drone/start         → ドローン開始
-  /matoma/drone/stop          → ドローンをフェードアウトして停止
-  /matoma/drone/param [名前] [値] → パラメーター更新
-    例: /matoma/drone/param detune 0.6
+  /matoma/drone/start              → ドローン開始
+  /matoma/drone/stop               → フェードアウト停止
+  /matoma/drone/param [名前] [値]  → パラメーター更新
+    例: /matoma/drone/param shimmer 0.7
 
-【単独での使い方】
-  1. SuperCollider でこのファイルを開く
-  2. Cmd+A → Cmd+Enter で全体を実行
-  3. ブラウザのスライダーか、下記の「動作確認」ブロックで操作する
-
-────────────────────────────────────────────────────────────────────
 【run_headless.scd への組み込み方】
-
-  run_headless.scd の s.waitForBoot({ ... }) の中、
-  既存の OSCdef の定義の後ろ（"MaToMa 起動完了" の前）に
+  s.waitForBoot({ ... }) の中、既存の OSCdef の後（"MaToMa 起動完了" の前）に
   ▼▼▼ ここから ▼▼▼ と ▲▲▲ ここまで ▲▲▲ の間をコピーする。
-
-  コピー後の run_headless.scd のイメージ:
-
-    s.waitForBoot({
-        // ... 既存の matoma_basic SynthDef ...
-        // ... 既存の OSCdef(\matoma_start) など ...
-
-        // ▼▼▼ ここから（drone.scd より）▼▼▼
-        SynthDef(\matoma_drone, { ... }).add;
-        s.sync;
-        ~currentDrone = nil;
-        OSCdef(\matoma_drone_start, ...);
-        OSCdef(\matoma_drone_stop,  ...);
-        OSCdef(\matoma_drone_param, ...);
-        // ▲▲▲ ここまで ▲▲▲
-
-        "MaToMa 起動完了".postln;
-    });
-────────────────────────────────────────────────────────────────────
+  なお ~droneBus の確保は run_headless.scd の s.waitForBoot 直後に行うこと。
 */
 
 (
 s.waitForBoot({
 
+    // ── Wet Drone Bus: Granular が読む共有バス ──────────────────────────
+    // GranularがDroneのウェット信号を素材として読み取るための2chバス。
+    // run_headless.scd では s.waitForBoot の冒頭（SynthDef定義の前）に置く。
+    ~droneBus = Bus.audio(s, 2);
+    "~droneBus 確保: %".format(~droneBus).postln;
+
     // ▼▼▼ ここから run_headless.scd にコピー ▼▼▼
 
-    // ── SynthDef: アンビエント・ドローン ──────────────────────────────
+    // ── SynthDef: 共鳴育成型 アンビエント・ドローン ─────────────────────
     SynthDef(\matoma_drone, {
-        arg freq   = 60,
-            detune = 0.3,
-            cutoff = 800,
-            drift  = 0.1,
-            room   = 0.6,
-            amp    = 0.4,
-            gate   = 1;
+        arg freq         = 60,
+            feedback_amt = 0.25,
+            shimmer      = 0.4,
+            room         = 0.7,
+            amp          = 0.35,
+            gate         = 1;
 
         // SCルール: var宣言はすべて先頭にまとめる
-        var lfoRate, lfoSignal, cutoffMod, detuneHz;
-        var sigL, sigR, env, sig;
+        var noise, fb, klanked, saturated;
+        var shifted, shimmered;
+        var env, wetL, wetR, sig;
 
-        // ── LFO: drift が速度と深度を同時に制御 ─────────────────────
-        //
-        // drift = 0.0 → lfoRate ≈ 0.01 Hz（約100秒周期）、変化量ほぼゼロ
-        // drift = 0.5 → lfoRate ≈ 0.06 Hz（約17秒周期）、cutoff が±75%揺れる
-        // drift = 1.0 → lfoRate ≈ 0.35 Hz（約3秒周期）、cutoff が±150%揺れる
-        lfoRate   = drift.clip(0.001, 1).linexp(0.001, 1, 0.01, 0.35);
-        lfoSignal = LFNoise1.kr(lfoRate);
-        cutoffMod = (cutoff * (1 + lfoSignal * drift * 1.5)).clip(80, 16000);
+        // ── PinkNoise: 共鳴の「種」 ──────────────────────────────────────
+        // PinkNoiseは自然界に近いスペクトル分布を持つ雑音。
+        // これを倍音バンクに通すことで「自然に育つ音」になる。
+        noise = PinkNoise.ar(0.12);
 
-        // ── オシレーター: L/R で逆方向にデチューン → 真のステレオ ───
-        //
-        // Lは+方向、Rは-方向にずらすことで、音が左右に広がって聞こえる。
-        // サブバス（freq*0.5）で低域の厚みを出し、
-        // 三角波（LFTri）は倍音が少なく丸いので温かみを加える。
-        detuneHz = freq * detune * 0.08;
-        sigL = Mix([
-            SinOsc.ar(freq,                      0),
-            SinOsc.ar(freq + detuneHz * 0.9,     0.25pi),
-            SinOsc.ar(freq + detuneHz * 0.4,     0.6pi),
-            SinOsc.ar(freq * 2 + detuneHz * 0.2, 0.1pi)  * 0.4,  // 1オクターブ上
-            SinOsc.ar(freq * 0.5,                0.8pi)  * 0.5,  // サブバス
-            LFTri.ar(freq - detuneHz * 0.15)            * 0.15,  // 温かみ
-        ]) * 0.2;
-        sigR = Mix([
-            SinOsc.ar(freq,                      0.5pi),
-            SinOsc.ar(freq - detuneHz * 0.9,     0.75pi),
-            SinOsc.ar(freq - detuneHz * 0.4,     0.3pi),
-            SinOsc.ar(freq * 2 - detuneHz * 0.2, 0.9pi)  * 0.4,
-            SinOsc.ar(freq * 0.5,                0.2pi)  * 0.5,
-            LFTri.ar(freq + detuneHz * 0.15)            * 0.15,
-        ]) * 0.2;
+        // ── LocalIn: フィードバックループの入口 ─────────────────────────
+        // 前の出力信号を少量だけ入力に混ぜることで、倍音が自己増幅する。
+        // 参照: synthesis_ambient_drone.md / sa_feedback_drone
+        fb = LocalIn.ar(2);
 
-        // ── ローパスフィルター（rq=0.7: 緩やか・温かいロールオフ） ──
-        sigL = RLPF.ar(sigL, cutoffMod,        0.7);
-        sigR = RLPF.ar(sigR, cutoffMod * 0.96, 0.7);
+        // ── Klank: 倍音フィルターバンク（胴鳴り） ───────────────────────
+        // Klank は「共鳴周波数・振幅・減衰時間」の配列で楽器の胴体を模倣する。
+        // 非整数倍音（2.756, 5.404 ...）を使うと「金属板」でなく「空気の塊」のような質感になる。
+        // 参照: synthesis_physical_modeling.md / sa_modal_bar
+        klanked = Klank.ar(`[
+            [freq,            freq * 1.501,  freq * 2.756,  freq * 3.999,  freq * 5.404],
+            [1.0,             0.7,           0.5,           0.3,           0.15],
+            [4.0,             3.0,           2.0,           1.5,           1.0]
+        ], noise + (fb[0] * feedback_amt));
 
-        // ── ソフトサチュレーション → 倍音付加・温かみ ───────────────
-        sigL = LeakDC.ar((sigL * 2.5).tanh) * 0.5;
-        sigR = LeakDC.ar((sigR * 2.5).tanh) * 0.5;
+        // ステレオ感のため、わずかに異なる倍音比率でLチャンネルを追加生成
+        klanked = [
+            klanked,
+            Klank.ar(`[
+                [freq * 1.002, freq * 1.503,  freq * 2.759,  freq * 4.003,  freq * 5.407],
+                [0.9,          0.65,          0.45,          0.27,          0.13],
+                [4.1,          3.1,           2.1,           1.55,          1.05]
+            ], noise + (fb[1] * feedback_amt))
+        ];
 
-        // ── エンベロープ ─────────────────────────────────────────────
-        env  = Linen.kr(gate, 1.0, 1.0, 8.0, 2);
-        sigL = sigL * env;
-        sigR = sigR * env;
+        // ── Limiter + AllpassC: クリッピング防止と空間拡散 ───────────────
+        // AllpassC は位相をランダムに拡散させてリバーブ感を薄く付与する（前処理）。
+        klanked = Limiter.ar(klanked, 0.65);
+        klanked = AllpassC.ar(
+            LPF.ar(klanked, freq * 8.0),
+            0.08,
+            [LFNoise1.kr(0.11).range(0.03, 0.07),
+             LFNoise1.kr(0.09).range(0.04, 0.08)],
+            2.0
+        );
 
-        // ── ステレオリバーブ（FreeVerb2 = 真のステレオ空間） ─────────
-        sig = FreeVerb2.ar(sigL, sigR, mix: room, room: room, damp: 0.5);
+        // ── LocalOut: フィードバックループの出口 ────────────────────────
+        LocalOut.ar(klanked);
+
+        // ── tanh サチュレーション: 温かみと倍音密度 ─────────────────────
+        // 軽いオーバードライブにより高次倍音が加わり、音が「息づく」ようになる。
+        saturated = LeakDC.ar((klanked * 2.0).tanh) * 0.55;
+
+        // ── Shimmer Reverb: リバーブ尾部をオクターブ上にピッチシフト ─────
+        // 残響がオクターブ上に戻ることで「空に溶けていく」浮遊感が生まれる。
+        // 参照: synthesis_ambient_drone.md / sa_shimmer
+        shifted  = PitchShift.ar(saturated, 0.1, 2.0, 0.01, 0.005);
+        shimmered = [
+            saturated[0] + (shifted[0] * shimmer),
+            saturated[1] + (shifted[1] * shimmer)
+        ];
+
+        // ── エンベロープ ─────────────────────────────────────────────────
+        // attack 4秒 / release 8秒 の非常に緩やかな立ち上がり・終わり
+        env = EnvGen.ar(Env.adsr(4.0, 0.3, 0.88, 8.0), gate, doneAction: 2);
+        shimmered = shimmered * env;
+
+        // ── ~droneBus への書き出し（Granular 用ウェット素材） ────────────
+        // FreeVerb2 を通す前の「シマーかかった信号」をバスに流す。
+        // これによりGranularが「まだ乾いていない、気体のような素材」を拾える。
+        Out.ar(~droneBus, shimmered);
+
+        // ── FreeVerb2: 最終空間演出 ──────────────────────────────────────
+        // feedback/knowledge.md の「ドローン > 効いた操作」に基づき、
+        // 残響が必要なときは GVerb への切り替えも選択肢に残しておく。
+        sig = FreeVerb2.ar(
+            shimmered[0], shimmered[1],
+            mix:  room.linlin(0.0, 1.0, 0.45, 0.92),
+            room: room.linlin(0.0, 1.0, 0.60, 0.95),
+            damp: room.linlin(0.0, 1.0, 0.55, 0.12)
+        );
+
         Out.ar(0, sig * amp);
     }).add;
 
     s.sync;  // SynthDef がサーバーに届くまで待つ
 
-    "シンセ定義完了: \\matoma_drone".postln;
+    "シンセ定義完了: \\matoma_drone (v2 共鳴育成型)".postln;
 
     // ── グローバル変数: 現在鳴っているドローンを記憶 ─────────────────
     ~currentDrone = nil;
 
-    // ── OSCdef: ドローンを開始する ──────────────────────────────────
+    // ── OSCdef: ドローンを開始する ──────────────────────────────────────
     OSCdef(\matoma_drone_start, { |msg|
         {
             if (~currentDrone.notNil) {
                 ~currentDrone.set(\gate, 0);  // 既存をフェードアウト
             };
             ~currentDrone = Synth(\matoma_drone);
-            "ドローン開始".postln;
+            "ドローン開始 (v2)".postln;
         }.defer;
     }, '/matoma/drone/start');
 
-    // ── OSCdef: ドローンを停止する ──────────────────────────────────
-    // gate=0 を渡すと Linen エンベロープが release（8秒かけてフェードアウト）
+    // ── OSCdef: ドローンを停止する ──────────────────────────────────────
+    // gate=0 を渡すと Env.adsr の release（8秒フェードアウト）が起動する
     OSCdef(\matoma_drone_stop, { |msg|
         {
             if (~currentDrone.notNil) {
@@ -155,9 +171,9 @@ s.waitForBoot({
         }.defer;
     }, '/matoma/drone/stop');
 
-    // ── OSCdef: パラメーターをリアルタイム更新 ──────────────────────
+    // ── OSCdef: パラメーターをリアルタイム更新 ──────────────────────────
     // 受信形式: ['/matoma/drone/param', 'パラメーター名', 値]
-    // 例: ['/matoma/drone/param', 'drift', 0.7]
+    // 例: ['/matoma/drone/param', 'shimmer', 0.7]
     OSCdef(\matoma_drone_param, { |msg|
         var param = msg[1].asSymbol;
         var value = msg[2].asFloat;
@@ -171,13 +187,14 @@ s.waitForBoot({
 
     // ▲▲▲ ここまで run_headless.scd にコピー ▲▲▲
 
-    "MaToMa ドローンモジュール起動完了。".postln;
+    "MaToMa ドローンモジュール起動完了 (v2 共鳴育成型)。".postln;
     "".postln;
-    "── 動作確認コマンド ──────────────────────────────".postln;
-    "ドローン開始: NetAddr('127.0.0.1', 57120).sendMsg('/matoma/drone/start')".postln;
-    "根音変更:     NetAddr('127.0.0.1', 57120).sendMsg('/matoma/drone/param', 'freq', 55)".postln;
-    "自律ゆらぎ:   NetAddr('127.0.0.1', 57120).sendMsg('/matoma/drone/param', 'drift', 0.8)".postln;
-    "停止:         NetAddr('127.0.0.1', 57120).sendMsg('/matoma/drone/stop')".postln;
+    "── 動作確認コマンド ──────────────────────────────────────────".postln;
+    "ドローン開始:     NetAddr('127.0.0.1', 57120).sendMsg('/matoma/drone/start')".postln;
+    "周波数変更:       NetAddr('127.0.0.1', 57120).sendMsg('/matoma/drone/param', 'freq', 55)".postln;
+    "フィードバック強: NetAddr('127.0.0.1', 57120).sendMsg('/matoma/drone/param', 'feedback_amt', 0.4)".postln;
+    "シマー強:         NetAddr('127.0.0.1', 57120).sendMsg('/matoma/drone/param', 'shimmer', 0.7)".postln;
+    "停止:             NetAddr('127.0.0.1', 57120).sendMsg('/matoma/drone/stop')".postln;
 });
 )
 
@@ -189,8 +206,11 @@ s.waitForBoot({
 // ドローンを開始する
 // NetAddr("127.0.0.1", 57120).sendMsg('/matoma/drone/start');
 
-// drift を上げて自律ゆらぎを強くする
-// NetAddr("127.0.0.1", 57120).sendMsg('/matoma/drone/param', 'drift', 0.8);
+// フィードバック量を上げて倍音を育てる
+// NetAddr("127.0.0.1", 57120).sendMsg('/matoma/drone/param', 'feedback_amt', 0.4);
+
+// シマーを強くして浮遊感を出す
+// NetAddr("127.0.0.1", 57120).sendMsg('/matoma/drone/param', 'shimmer', 0.7);
 
 // 根音を低くする（重いドローン）
 // NetAddr("127.0.0.1", 57120).sendMsg('/matoma/drone/param', 'freq', 40);

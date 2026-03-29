@@ -1,209 +1,241 @@
 /*
-MaToMa: グラニューラサンプラー
-================================
-音声ファイルを「グレイン」と呼ばれる米粒ほどの短い音片に分割して、
-大量に重ねて再生するモジュール。
+MaToMa: グラニュラーモジュール v2 — Drone素材粒分解型
+==========================================================
+【設計思想】
+  Drone が作り出した「湿った空気」を、そのまま粒に分解してテクスチャを作る。
+  Tim Hecker 的な「残響ごと粒になる」密度を実現するため、
+  ~droneBus（Shimmer Reverb後の信号）をリングバッファに録音し続け、
+  GrainBuf でリアルタイムに粒に変換する。
 
-「グレイン（grain）」とは：
-  ふつうのサンプラーが音声をそのまま再生するのと違い、
-  音声を数十〜数百ミリ秒の断片に刻んで、霧や雲のように重ね合わせる。
-  これにより：
-    - 音の質感を保ちながら時間を引き伸ばす・圧縮できる
-    - 位置（pos）をゆっくり動かすとスクラブ感や時間が滲む感覚になる
-    - density・size で密度や粒の粗さをコントロールできる
+【シグナルチェーンのイメージ】
+  ~droneBus（Droneのウェット信号）
+    → RecordBuf で2秒のリングバッファに継続録音
+    → GrainBuf で粒に分解（spray: 0=規則的/1=ランダム）
+    → 個別FreeVerb2リバーブ
+    → ~effectBus（グローバルエフェクト層へ）
+    → Out（スピーカー出力）
 
-使い方:
-  1. sc/samples/ に WAV/AIFF ファイルを置く
-  2. このファイルを SuperCollider で開く
-  3. Cmd+A → Cmd+Enter で全体を実行
-  4. OSC '/matoma/granular/load' でバッファをロード
-  5. OSC '/matoma/granular/start' で再生開始
+【パラメーター】
+  density : 1秒あたりのグレイン数（5〜80）
+  spray   : 0=Impulse（規則的）↔ 1=Dust（ランダム）。SelectX.kr でブレンド
+  pos     : バッファ内の再生位置（0.0〜1.0）
+  size    : グレインの長さ（秒）。小=ざらざら、大=滑らか
+  room    : 個別リバーブのroom size（0.0〜1.0）
+  amp     : 音量（0.0〜1.0）
 
-パラメーター:
-  buf       : バッファ番号。GrainBuf が読み込む音声データを指定する
-  rate      : 再生速度・ピッチの倍率（0.5=1オクターブ下、1.0=元の音程、2.0=1オクターブ上）
-  pos       : バッファ内の再生位置（0.0〜1.0）。「音のどのあたりを使うか」
-  posrand   : 位置のランダム幅（0.0=完全固定、0.5=大きくばらける）
-  pitchrand : ピッチのランダム幅（0.0=固定、0.1=大きく揺れる）
-  size      : グレインの長さ（秒、0.01〜0.5）。小さい=ざらざら、大きい=滑らか
-  density   : 1秒あたりのグレイン数（1〜100）。多いほど音が密に重なる
-  trig_mode : トリガーの種類
-              0 = Dust（ランダム間隔）→ 有機的・カオス的なテクスチャ
-              1 = Impulse（等間隔）  → リズミカル・機械的なテクスチャ
-  amp       : 音量（0.0〜1.0）
+【OSCアドレス】
+  /matoma/granular/start              → グラニュラー開始
+  /matoma/granular/stop               → フェードアウト停止
+  /matoma/granular/param [名前] [値]  → パラメーター更新
+    例: /matoma/granular/param density 30
+        /matoma/granular/param spray 0.7
 
-OSC アドレス:
-  /matoma/granular/load  → バッファロード [ファイルパス文字列]
-  /matoma/granular/start → 再生開始
-  /matoma/granular/stop  → フェードアウトして停止
-  /matoma/granular/param → パラメーター更新 [名前, 値]
-                           例: ['/matoma/granular/param', 'density', 30]
-
-── run_headless.scd への組み込み方 ──────────────────────────────────
-s.waitForBoot({ の中に以下を追加し、s.sync; の前に置く:
-
-  // ① このファイルの SynthDef 定義ブロックをそのままコピーして貼り付ける
-  //    （SynthDef(\matoma_granular, { ... }).add; の部分）
-
-  // ② s.sync; の後、デモバッファ生成とOSCdef定義ブロックをコピーして貼り付ける
-
-  // ③ サンプルを使う場合は、run_headless.scd の起動前に
-  //    '/matoma/granular/load' OSCを送ってバッファをロードする
-────────────────────────────────────────────────────────────────────
+【技術的補足】
+  - RecordBuf の loop:1 で2秒のリングバッファを維持する
+  - GrainBuf の pos は 0〜1 で「バッファのどこを使うか」を指定する
+  - SelectX.kr で Impulse ↔ Dust をブレンドすることで
+    spray パラメーター1つで「機械的↔有機的」を連続的に制御できる
+    （参照: norns_sc_patterns.md / silo_grain パターン）
 */
 
 (
 s.waitForBoot({
 
-    // ── SynthDef: グラニューラサンプラー ──────────────────────────
-    //
-    // GrainBuf: SuperCollider 標準のグレイン合成 UGen
-    //   trigger  → グレインを発生させるタイミング（ここでは Dust でランダム）
-    //   dur      → 1グレインの長さ（秒）= size
-    //   sndbuf   → 読み込むバッファ
-    //   rate     → 再生速度（ピッチも変わる）
-    //   pos      → バッファ内の位置（0.0〜1.0）
-    //   pan      → ステレオの左右位置（-1.0〜+1.0）
-    //
-    SynthDef(\matoma_granular, {
-        arg buf = 0,
-            rate = 1.0,
-            pos = 0.0,
-            posrand = 0.05,    // 位置のランダム幅（0.0=固定、0.5=大きくばらける）
-            pitchrand = 0.01,  // ピッチのランダム幅（0.0=固定、0.1=大きく揺れる）
-            size = 0.1,        // グレインの長さ（秒）
-            density = 20,      // 1秒あたりのグレイン数
-            trig_mode = 0,     // 0=Dust（ランダム）、1=Impulse（等間隔）
-            amp = 0.5,
-            gate = 1;
+    // ── Wet Drone Bus と Effect Bus の確保 ──────────────────────────────
+    // ~droneBus は drone.scd（または run_headless.scd）で定義済み。
+    // ここでは単独実行テスト用に nil チェックして確保する。
+    if (~droneBus.isNil) {
+        ~droneBus = Bus.audio(s, 2);
+        "単独実行モード: ~droneBus を確保しました（bus: %)".format(~droneBus).postln;
+    };
+    if (~effectBus.isNil) {
+        ~effectBus = Bus.audio(s, 2);
+        "単独実行モード: ~effectBus を確保しました（bus: %)".format(~effectBus).postln;
+    };
 
-        // ── トリガー: Dust（ランダム）か Impulse（等間隔）を選択 ──
-        //
-        // Dust.kr   → バラバラなタイミングで発火 → 霧・有機的な質感
-        // Impulse.kr → 等間隔で発火              → リズミカル・機械的な質感
-        //
-        // Select.kr(trig_mode, [A, B]):
-        //   trig_mode=0 → A（Dust）を使う
-        //   trig_mode=1 → B（Impulse）を使う
-        // 両方とも常に動いているが、Select が出力を切り替えるだけなので問題ない
-        var trig_random  = Dust.kr(density);
-        var trig_regular = Impulse.kr(density);
-        var trigger = Select.kr(trig_mode, [trig_random, trig_regular]);
+    // ── グラニュラー用リングバッファ ──────────────────────────────────
+    // Drone の2秒分（ステレオ）をリングバッファに録音し続ける。
+    // GrainBuf はこのバッファから pos に従って粒を読む。
+    ~granularRingBuf = Buffer.alloc(s, (s.sampleRate * 2.0).round.asInteger, 2);
 
-        // ── 再生位置のランダム揺らぎ ─────────────────────────────
-        // pos を中心に ±posrand の範囲でグレインごとにランダムにばらける
-        // posrand=0.0 → 全グレインが pos の真上に固定（ピンポイント再生）
-        // posrand=0.5 → バッファ全体に広くばらける
-        var grainPos = (pos + TRand.kr(posrand.neg, posrand, trigger)).clip(0.0, 1.0);
+    s.sync;
+    "グラニュラー リングバッファ確保完了 (bufnum: %)".format(~granularRingBuf.bufnum).postln;
 
-        // ── ピッチのランダム揺らぎ ───────────────────────────────
-        // pitchrand=0.0 → 全グレインが同じピッチ（クリア）
-        // pitchrand=0.1 → グレインごとに ±10% ピッチが揺れる（霞感）
-        var grainRate = rate * (1.0 + TRand.kr(pitchrand.neg, pitchrand, trigger));
-
-        // ── ステレオの広がり ─────────────────────────────────────
-        // グレインごとに左右の位置をランダムに変える（±0.8 の範囲で固定）
-        var pan = TRand.kr(-0.8, 0.8, trigger);
-
-        // ── グラニューラ合成 ──────────────────────────────────────
-        var sig = GrainBuf.ar(
-            numChannels: 2,      // ステレオ出力
-            trigger: trigger,
-            dur: size,
-            sndbuf: buf,
-            rate: grainRate,
-            pos: grainPos,
-            interp: 2,           // 線形補間（音の繋ぎ目を滑らかに）
-            pan: pan,
-            envbufnum: -1        // デフォルトのベル型エンベロープ（Hanning窓）
-        );
-
-        // ── エンベロープ: フェードイン・アウト ───────────────────
-        // attack=0.5秒でふわっと立ち上がり、stop時は2秒でフェードアウト
-        sig = sig * Linen.kr(gate, 0.5, 1.0, 2.0, 2);
-
-        sig = sig * amp;
-
-        Out.ar(0, sig);
+    // ── SynthDef: リングバッファ録音器 ────────────────────────────────
+    // ~droneBus の信号を継続的にリングバッファへ書き込む。
+    // RecordBuf の loop:1 で永遠に上書き録音を続ける（リングバッファ）。
+    SynthDef(\matoma_granular_recorder, {
+        arg inBus, buf;
+        var sig = In.ar(inBus, 2);
+        // loop:1 でバッファ末尾に達したら先頭から上書き
+        RecordBuf.ar(sig, buf, loop: 1, trigger: 1, doneAction: 0);
     }).add;
-
-    "シンセ定義完了: \\matoma_granular".postln;
 
     s.sync;
 
-    // ── デモ用バッファ: ファイルがなくても試せるようにサイン波を生成 ──
-    // Buffer.alloc: 空のバッファを確保する（2秒分）
-    // sine1: 倍音成分をバッファに書き込む（1倍音・2倍音・3倍音・4倍音の重ね合わせ）
-    ~granularBuf = Buffer.alloc(s, (s.sampleRate * 2).round.asInteger, 1, { |buf|
-        buf.sine1([1.0, 0.5, 0.25, 0.125], asWavetable: false, normalize: true);
-        ~granularBufNum = buf.bufnum;
-        "デモ用バッファ生成完了（サイン波 2秒）。実際の音声ファイルを使う場合は".postln;
-        "'/matoma/granular/load' でファイルパスを送ってください。".postln;
-    });
+    // ── SynthDef: グラニュラー合成器 ──────────────────────────────────
+    // norns_sc_patterns.md の silo_grain パターンを基に実装。
+    // spray パラメーター: SelectX.kr で Impulse/Dust を連続ブレンド。
+    SynthDef(\matoma_granular, {
+        arg buf       = 0,    // リングバッファ番号
+            density   = 20,   // グレイン/秒
+            spray     = 0.3,  // 0=Impulse(規則的) 1=Dust(ランダム)
+            pos       = 0.5,  // バッファ内の読み取り位置（0.0〜1.0）
+            size      = 0.12, // グレインの長さ（秒）
+            jitter    = 0.08, // 位置のランダム幅（norns silo_grain のjitter相当）
+            room      = 0.5,  // 個別リバーブのroom size
+            amp       = 0.5,
+            gate      = 1,
+            outBus    = 0;    // 出力先バス（0=ハード出力、~effectBus=エフェクト層）
 
-    ~currentGranular = nil;
+        var trig_regular, trig_random, trig, grainPos;
+        var sig, wet, env;
 
-    // ── OSC: バッファをファイルからロード ────────────────────────
-    // msg の形式: ['/matoma/granular/load', '/path/to/file.wav']
-    OSCdef(\matoma_granular_load, { |msg|
-        var path = msg[1].asString;
-        {
-            if (~granularBuf.notNil) { ~granularBuf.free };
-            ~granularBuf = Buffer.read(s, path, action: { |buf|
-                ~granularBufNum = buf.bufnum;
-                if (~currentGranular.notNil) {
-                    ~currentGranular.set(\buf, ~granularBufNum);
-                };
-                "バッファロード完了: % (% frames, % ch)".format(
-                    path, buf.numFrames, buf.numChannels).postln;
-            });
-        }.defer;
-    }, '/matoma/granular/load');
+        // ── spray: 規則的（Impulse）↔ ランダム（Dust）をブレンド ──────
+        // SelectX.kr は 0〜1 の間でクロスフェードする。
+        // spray=0.0 → Impulse のみ（機械的・グリッド的）
+        // spray=0.5 → Impulse と Dust の中間（半有機的）
+        // spray=1.0 → Dust のみ（完全ランダム・霧的）
+        // 参照: norns_sc_patterns.md § 4. グレイン合成（Norns Siloパターン）
+        trig_regular = Impulse.kr(density);
+        trig_random  = Dust.kr(density);
+        trig = SelectX.kr(spray, [trig_regular, trig_random]);
 
-    // ── OSC: 再生開始 ────────────────────────────────────────────
+        // ── 再生位置 + Jitter ─────────────────────────────────────────
+        // pos を中心に LFNoise0 で揺らす（silo_grain の jitter 相当）
+        grainPos = pos + LFNoise0.kr(6).bipolar(jitter);
+        grainPos = grainPos.clip(0.0, 1.0);
+
+        // ── GrainBuf: リングバッファから粒を生成 ─────────────────────
+        // GrainBuf はバッファ録音した音を「粒」として再生する。
+        // pan を LFNoise1 でゆっくりランダム化してステレオ空間に散らす。
+        sig = GrainBuf.ar(
+            numChannels: 2,
+            trigger:     trig,
+            dur:         size,
+            sndbuf:      buf,
+            rate:        1.0,
+            pos:         grainPos,
+            interp:      2,           // 線形補間
+            pan:         LFNoise1.kr(3).range(-0.7, 0.7),
+            envbufnum:   -1           // デフォルト Hanning 窓
+        );
+
+        // ── 個別 FreeVerb2 リバーブ ───────────────────────────────────
+        // Granular 層の中程度リバーブ：粒の形が残る程度（room は中間）
+        // system_design.md § 各層の個別Reverb：「中程度（粒の形が残る程度）」
+        wet = FreeVerb2.ar(
+            sig[0], sig[1],
+            mix:  room.linlin(0.0, 1.0, 0.25, 0.75),
+            room: room.linlin(0.0, 1.0, 0.45, 0.85),
+            damp: room.linlin(0.0, 1.0, 0.6, 0.2)
+        );
+
+        // ── エンベロープ ──────────────────────────────────────────────
+        // 0.5秒でふわっと立ち上がり、stop時は2秒でフェードアウト
+        env = EnvGen.ar(Env.adsr(0.5, 0.0, 1.0, 2.0), gate, doneAction: 2);
+
+        Out.ar(outBus, wet * env * amp);
+    }).add;
+
+    s.sync;
+    "シンセ定義完了: \\matoma_granular_recorder, \\matoma_granular (v2 Drone素材粒分解型)".postln;
+
+    // ── グローバル変数の初期化 ─────────────────────────────────────────
+    ~currentGranular  = nil;
+    ~granularRecorder = nil;
+
+    // ── リングバッファ録音を開始する内部関数 ─────────────────────────
+    // Drone が動いていれば ~droneBus の信号が継続的に録音される。
+    // Drone が鳴っていなければ無音が録音されるだけ（害なし）。
+    ~startGranularRecorder = {
+        if (~granularRecorder.notNil) {
+            ~granularRecorder.free;
+        };
+        ~granularRecorder = Synth(\matoma_granular_recorder, [
+            \inBus, ~droneBus,
+            \buf, ~granularRingBuf.bufnum
+        ], addAction: \addToHead);
+        "グラニュラー録音器: 開始 (droneBus: %, ringBuf: %)".format(
+            ~droneBus, ~granularRingBuf.bufnum).postln;
+    };
+
+    // 録音器をすぐに起動する（常時録音）
+    { ~startGranularRecorder.(); }.defer;
+
+    // ── OSCdef: グラニュラー開始 ─────────────────────────────────────
     OSCdef(\matoma_granular_start, { |msg|
         {
             if (~currentGranular.notNil) {
-                ~currentGranular.set(\gate, 0);  // 既存をフェードアウト
+                ~currentGranular.set(\gate, 0);
             };
             ~currentGranular = Synth(\matoma_granular, [
-                \buf, ~granularBufNum ?? { 0 }
-            ]);
-            "グラニューラ開始".postln;
+                \buf,    ~granularRingBuf.bufnum,
+                \outBus, ~effectBus.index
+            ], addAction: \addToTail);
+            "グラニュラー開始 (ringBuf: %, outBus: %)".format(
+                ~granularRingBuf.bufnum, ~effectBus.index).postln;
         }.defer;
     }, '/matoma/granular/start');
 
-    // ── OSC: 停止 ────────────────────────────────────────────────
+    // ── OSCdef: グラニュラー停止 ─────────────────────────────────────
     OSCdef(\matoma_granular_stop, { |msg|
         {
             if (~currentGranular.notNil) {
-                ~currentGranular.set(\gate, 0);  // gate=0 でフェードアウト開始
+                ~currentGranular.set(\gate, 0);
                 ~currentGranular = nil;
-                "グラニューラ停止（フェードアウト中）".postln;
+                "グラニュラー停止（2秒フェードアウト）".postln;
             };
         }.defer;
     }, '/matoma/granular/stop');
 
-    // ── OSC: パラメーター更新 ─────────────────────────────────────
-    // msg の形式: ['/matoma/granular/param', 'パラメーター名', 値]
-    // 例: ['/matoma/granular/param', 'density', 40]
+    // ── OSCdef: パラメーター更新 ─────────────────────────────────────
+    // msg 形式: ['/matoma/granular/param', 'パラメーター名', 値]
+    // 例:
+    //   density → 粒の密度（5〜80）
+    //   spray   → ランダム度（0.0=規則的、1.0=完全ランダム）
+    //   pos     → 再生位置（0.0〜1.0）
+    //   size    → 粒サイズ（秒）
+    //   room    → リバーブ量（0.0〜1.0）
+    //   amp     → 音量（0.0〜1.0）
     OSCdef(\matoma_granular_param, { |msg|
         var param = msg[1].asSymbol;
         var value = msg[2].asFloat;
         {
             if (~currentGranular.notNil) {
                 ~currentGranular.set(param, value);
-                "グラニューラ パラメーター更新: % = %".format(param, value.round(0.001)).postln;
+                "グラニュラー param: % = %".format(param, value.round(0.001)).postln;
             };
         }.defer;
     }, '/matoma/granular/param');
 
-    "MaToMa グラニューラサンプラー起動完了。".postln;
-    "コマンド例:".postln;
-    "  ファイルロード → NetAddr('127.0.0.1', 57120).sendMsg('/matoma/granular/load', '/path/to/sample.wav')".postln;
-    "  再生開始      → NetAddr('127.0.0.1', 57120).sendMsg('/matoma/granular/start')".postln;
-    "  密度を上げる  → NetAddr('127.0.0.1', 57120).sendMsg('/matoma/granular/param', 'density', 50)".postln;
-    "  位置を動かす  → NetAddr('127.0.0.1', 57120).sendMsg('/matoma/granular/param', 'pos', 0.5)".postln;
-    "  停止          → NetAddr('127.0.0.1', 57120).sendMsg('/matoma/granular/stop')".postln;
+    "MaToMa グラニュラーモジュール起動完了 (v2 Drone素材粒分解型)".postln;
+    "".postln;
+    "── 動作確認コマンド ──────────────────────────────────────────".postln;
+    "グラニュラー開始:   NetAddr('127.0.0.1', 57120).sendMsg('/matoma/granular/start')".postln;
+    "密度を上げる:       NetAddr('127.0.0.1', 57120).sendMsg('/matoma/granular/param', 'density', 40)".postln;
+    "ランダム化(spray):  NetAddr('127.0.0.1', 57120).sendMsg('/matoma/granular/param', 'spray', 0.8)".postln;
+    "位置を動かす:       NetAddr('127.0.0.1', 57120).sendMsg('/matoma/granular/param', 'pos', 0.7)".postln;
+    "粒を大きくする:     NetAddr('127.0.0.1', 57120).sendMsg('/matoma/granular/param', 'size', 0.25)".postln;
+    "停止:               NetAddr('127.0.0.1', 57120).sendMsg('/matoma/granular/stop')".postln;
 });
 )
+
+// ────────────────────────────────────────────────────────────────────
+// 動作確認（このファイルを単独実行中のみ使用）
+// ────────────────────────────────────────────────────────────────────
+
+// グラニュラー開始（~droneBus に何かが流れていること前提）
+// NetAddr("127.0.0.1", 57120).sendMsg('/matoma/granular/start');
+
+// spray を上げてランダム化（霧的テクスチャ）
+// NetAddr("127.0.0.1", 57120).sendMsg('/matoma/granular/param', 'spray', 0.9);
+
+// 密度を上げる（密な霧）
+// NetAddr("127.0.0.1", 57120).sendMsg('/matoma/granular/param', 'density', 50);
+
+// 粒を大きくする（よりアンビエント的）
+// NetAddr("127.0.0.1", 57120).sendMsg('/matoma/granular/param', 'size', 0.3);
+
+// 停止
+// NetAddr("127.0.0.1", 57120).sendMsg('/matoma/granular/stop');

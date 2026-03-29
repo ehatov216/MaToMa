@@ -1,26 +1,138 @@
 [
   {
-    "name": "暗い",
-    "freq": 110,
-    "cutoff": 400,
-    "amp": 0.4
+    "name": "深淵",
+    "comment": "Space層が支配。低域・chaos低。Aoyama的な静寂",
+    "layers": {
+      "granular": false,
+      "spectral": false,
+      "turing": false
+    },
+    "space_ratio": 0.85,
+    "event_ratio": 0.15,
+    "drone": {
+      "freq_attractor": 41,
+      "freq_range": 15,
+      "feedback_attractor": 0.35,
+      "shimmer_attractor": 0.5,
+      "room_attractor": 0.92,
+      "chaos_width": 0.65
+    },
+    "granular": {
+      "density_attractor": 5,
+      "density_range": 8,
+      "spray_attractor": 0.3,
+      "room_attractor": 0.7,
+      "chaos_width": 0.5
+    },
+    "rhythmic": {
+      "prob_attractor": 0.1,
+      "prob_range": 0.1
+    }
   },
   {
-    "name": "標準",
-    "freq": 220,
-    "cutoff": 1000,
-    "amp": 0.5
+    "name": "浮遊",
+    "comment": "標準。Aoyama的な粒子の場",
+    "layers": {
+      "granular": true,
+      "spectral": false,
+      "turing": true
+    },
+    "space_ratio": 0.75,
+    "event_ratio": 0.25,
+    "drone": {
+      "freq_attractor": 55,
+      "freq_range": 20,
+      "feedback_attractor": 0.25,
+      "shimmer_attractor": 0.4,
+      "room_attractor": 0.75,
+      "chaos_width": 0.35
+    },
+    "granular": {
+      "density_attractor": 12,
+      "density_range": 15,
+      "spray_attractor": 0.5,
+      "room_attractor": 0.6,
+      "chaos_width": 0.3
+    },
+    "rhythmic": {
+      "prob_attractor": 0.3,
+      "prob_range": 0.15
+    }
   },
   {
-    "name": "明るい",
-    "freq": 440,
-    "cutoff": 4000,
-    "amp": 0.4
+    "name": "緊張",
+    "comment": "Event層が前に出る。Autechre的なカオス増大",
+    "layers": {
+      "granular": true,
+      "spectral": true,
+      "turing": true
+    },
+    "space_ratio": 0.5,
+    "event_ratio": 0.5,
+    "drone": {
+      "freq_attractor": 82,
+      "freq_range": 30,
+      "feedback_attractor": 0.4,
+      "shimmer_attractor": 0.6,
+      "room_attractor": 0.6,
+      "chaos_width": 0.6
+    },
+    "granular": {
+      "density_attractor": 25,
+      "density_range": 20,
+      "spray_attractor": 0.7,
+      "room_attractor": 0.5,
+      "chaos_width": 0.55
+    },
+    "rhythmic": {
+      "prob_attractor": 0.5,
+      "prob_range": 0.2
+    },
+    "spectral": {
+      "freq": 200,
+      "smear": 0.5,
+      "bits": 10,
+      "rate": 0.6,
+      "chaos": 0.5,
+      "amp": 0.3
+    }
   },
   {
-    "name": "高音・静か",
-    "freq": 660,
-    "cutoff": 6000,
-    "amp": 0.25
+    "name": "崩壊",
+    "comment": "最大chaos。Hecker的密度とAutechre的崩壊",
+    "layers": {
+      "granular": true,
+      "spectral": true,
+      "turing": true
+    },
+    "space_ratio": 0.4,
+    "event_ratio": 0.6,
+    "drone": {
+      "freq_attractor": 110,
+      "freq_range": 40,
+      "feedback_attractor": 0.45,
+      "shimmer_attractor": 0.8,
+      "room_attractor": 0.5,
+      "chaos_width": 0.85
+    },
+    "granular": {
+      "density_attractor": 40,
+      "density_range": 25,
+      "spray_attractor": 0.9,
+      "room_attractor": 0.4,
+      "chaos_width": 0.75
+    },
+    "rhythmic": {
+      "prob_attractor": 0.7,
+      "prob_range": 0.25
+    },
+    "spectral": {
+      "freq": 150,
+      "smear": 0.7,
+      "bits": 8,
+      "rate": 0.4,
+      "chaos": 0.75,
+      "amp": 0.45
+    }
   }
 ]

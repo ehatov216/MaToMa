@@ -155,3 +155,73 @@ def make_arp_pattern(
         f'd{track} $ note (scale "{tidal_scale}" (run {steps}) + {root_midi}) '
         f'# s "{synth}" # amp {amp:.2f}'
     )
+
+
+# ── ドラムパターンプリセット ─────────────────────────────────────────
+# Autechre 的なリズムに近づくためのパターン群
+# ?x = 確率 x でトリガー、*n = n 分割、~ = 休符、! = 繰り返し
+DRUM_PRESETS: dict[str, dict[str, str]] = {
+    "minimal": {
+        "kick":  '"bd ~ ~ bd"',
+        "snare": '"~ ~ sd ~"',
+        "hat":   '"hh ~ hh ~"',
+    },
+    "polyrhythm": {
+        "kick":  '"bd ~ bd ~ ~" # slow 1.33',
+        "snare": '"~ sd ~ ~"',
+        "hat":   '"hh*3 ~ hh*2"',
+    },
+    "glitch": {
+        "kick":  '"bd?0.6 ~ bd?0.4 ~ bd?0.3 ~"',
+        "snare": '"~ sd?0.5 ~ ~ sd?0.3"',
+        "hat":   '"hh?0.8 hh*2?0.5 ~ hh?0.7"',
+    },
+    "euclidean": {
+        "kick":  '"bd" # euclid 3 8',
+        "snare": '"sd" # euclid 2 8',
+        "hat":   '"hh" # euclid 5 8',
+    },
+    "fragment": {
+        "kick":  '"bd?0.3 ~ ~ ~ bd?0.2 ~ ~ ~"',
+        "snare": '"~ ~ ~ sd?0.25 ~ ~ ~ ~"',
+        "hat":   '"hh?0.4 ~ hh?0.3 ~"',
+    },
+    "autechre": {
+        "kick":  '"bd ~ bd?0.5 ~ ~ bd?0.3 bd ~" # slow 1.5',
+        "snare": '"~ sd?0.6 ~ ~ ~ sd?0.4 ~"',
+        "hat":   '"hh*2?0.7 ~ hh?0.5 hh*3?0.4 ~ hh?0.6"',
+    },
+}
+
+
+def make_drum_pattern(
+    kick_track: int,
+    snare_track: int,
+    hat_track: int,
+    preset: str = "minimal",
+    kick_gain: float = 0.9,
+    snare_gain: float = 0.7,
+    hat_gain: float = 0.5,
+    speed: float = 1.0,
+) -> list[str]:
+    """ドラムパターンを生成する。3トラック分のコードリストを返す。
+
+    Args:
+        kick_track: キックのTidalトラック番号（d3 等）
+        snare_track: スネアのトラック番号
+        hat_track: ハットのトラック番号
+        preset: DRUM_PRESETS のキー
+        kick_gain, snare_gain, hat_gain: 各音量
+        speed: テンポ倍率（0.5=半速、2.0=倍速）
+    """
+    p = DRUM_PRESETS.get(preset, DRUM_PRESETS["minimal"])
+    speed_suffix = f" # fast {speed:.2f}" if speed != 1.0 else ""
+
+    def track(n: int, pattern: str, gain: float) -> str:
+        return f'd{n} $ s {pattern} # gain {gain:.2f}{speed_suffix}'
+
+    return [
+        track(kick_track,  p["kick"],  kick_gain),
+        track(snare_track, p["snare"], snare_gain),
+        track(hat_track,   p["hat"],   hat_gain),
+    ]

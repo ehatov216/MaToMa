@@ -57,8 +57,6 @@ async def test_on_osc_message_creates_broadcast_task():
     async def fake_broadcast(message):
         broadcast_calls.append(message)
 
-    loop = asyncio.get_event_loop()
-
     with patch.object(bridge, "broadcast", side_effect=fake_broadcast):
         bridge.on_osc_message("/matoma/param/cutoff", 0.75)
         # タスクが実行される時間を与える

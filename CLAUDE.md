@@ -51,10 +51,12 @@ SuperCollider を操作する。
 3. `feedback/knowledge.md` を読み、過去の試行で得られた法則を把握する
 4. `feedback/logs/` 内の直近3ファイルを確認し、前回セッションの文脈を把握する
 
-### SCコードを書く前に必ず行うこと（MANDATORY）
+### 音響系コードを書く前に必ず行うこと（MANDATORY）
+
+> SuperCollider・TidalCycles・その他の音響/音楽生成コードすべてに適用する。
 
 1. **ユーザーの意図を `feedback/knowledge.md` の「言葉とパラメーターの対応」で確認する**
-2. **`knowledge/rag/sources/` の該当ファイルを Read ツールで直接読む**
+2. **`knowledge/rag/sources/` の該当ファイルを Read ツールで直接読む**（先行技術・コードスニペットを必ず確認してから実装する）
 
    | モジュール／意図 | 読むファイル |
    |----------------|------------|
@@ -67,12 +69,34 @@ SuperCollider を操作する。
    | ウェーブテーブル | `synthesis_wavetable.md` |
    | 物理モデリング・弦・管 | `synthesis_physical_modeling.md` |
    | パーカッション・打楽器 | `synthesis_percussion.md` |
+   | カオス・非線形・Fb1・DXクロスフェード・ウェーブフォールド | `plugins_sc_quarks.md` |
+   | 音声解析・ML・スペクトル特徴量・HPSS・ニューラルネット | `plugins_flucoma.md` |
+   | DAW連携・OSC・Ossia Score・TouchDesigner・VCV Rack | `workstation_daw_integration.md` |
+   | Tidalパターン記法・ミニ記法・ユークリッド | `tidal_mini_notation.md` |
+   | Tidalパターン関数・every・perlin・degrade・トランジション | `tidal_pattern_functions.md` |
+   | Tidal×SC連携・SuperDirt・カスタムSynthDef・エフェクト | `tidal_sc_superdirt.md` |
+   | チューリングマシン・シフトレジスタ・Dejavu的ランダム | `synthesis_turing_machine.md` |
+   | Orca連携・2DグリッドライブコーディングとSC/Tidal制御 | `control_orca_integration.md` |
+   | 確率制御設計・パラメーターロック・ラチェット・ポリリズム | `design_probability_control.md` |
+   | Norns SCパターン・ParGroup・SelectX・KS弦・SpecCentroid | `norns_sc_patterns.md` |
+   | UGenカタログ・発振器・フィルター・FFT・パンニング一覧 | `sc_ugen_catalog.md` |
+   | Pbind/Pdef/Ndef・パターンクラス・スケール・ProxySpace | `sc_pattern_system.md` |
+   | ユークリッドリズム・Pwrand・normalizeSum・レイヤリング | `sc_livecoding_techniques.md` |
+   | Autechre美学・Dry/Wet判断・FM哲学・ストカスティック設計 | `artist_autechre_aesthetics.md` |
+   | Autechre制作技法・FM実装・FDN・ユークリッドリズム・機材詳細 | `artist_autechre_production.md` |
+   | Burial美学・非グリッドリズム・Foley・ハウントロジー・Wet霧 | `artist_burial_aesthetics.md` |
+   | Alva Noto美学・還元主義・120bpmグリッド・グリッチ・沈黙設計 | `artist_alvanoto_aesthetics.md` |
+   | Tim Hecker美学・制御された崩壊・グラニュラー・スペクトル処理・リアンプ | `artist_timhecker_aesthetics.md` |
+   | GitHubドローン事例・Pseed・フィードバックループ・多声ノイズ | `github_drone_generators.md` |
+   | GitHubグラニュラー事例・GrainBuf・Warp1・スキャッター設計 | `github_granular_synthesizers.md` |
 
 3. **ユーザーの日本語フィードバックを英語のSCテクニックに変換してから実装する**
    - 変換表は `feedback/knowledge.md` の「言葉とパラメーターの対応」を参照
    - 変換表にない語は `feedback/vocabulary.md` の「日英マッピング」を参照
 
 4. **参照したファイルのコード例を基にして実装する（ゼロから書かない）**
+   - すでに出来上がっている技術・スニペットがあれば、それを流用・改変する形で進める
+   - 新規実装は RAG にない場合のみ許可
 
 ### フィードバックセッション中のルール
 - 変更前に「仮説：〇〇だからこうする」を1行で述べる

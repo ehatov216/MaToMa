@@ -3,4 +3,4 @@ line-length = 79
 
 [tool.ruff.lint]
 # B101 (assert in non-test code) はテストファイルでは無効化する
-per-file-ignores = { "tests/**" = ["B101"] }
+per-file-ignores = { "tests/**" = ["S101"] }
