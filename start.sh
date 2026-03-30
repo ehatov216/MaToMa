@@ -31,10 +31,24 @@ pkill -f "scsynth"             2>/dev/null || true
 echo "  待機中..."
 sleep 1.5
 
+# ── CoreAudio プリウォーム ──────────────────────────────────────
+# scsynthを一瞬起動して停止することでCoreAudioを先にリセットさせる。
+# 本番起動時にはCoreAudioがすでに安定しており、他アプリのストリームが
+# 切断されなくなる。
+echo "[2/4] CoreAudioプリウォーム中..."
+SCSYNTH="/Applications/SuperCollider.app/Contents/Resources/scsynth"
+if [[ -x "$SCSYNTH" ]]; then
+    "$SCSYNTH" -u 57111 -o 2 -i 0 > /dev/null 2>&1 &
+    PREWARM_PID=$!
+    sleep 2
+    kill "$PREWARM_PID" 2>/dev/null || true
+    sleep 1
+fi
+
 # ── 起動 ────────────────────────────────────────────────────────
-echo "[2/3] bridge.py を起動中..."
+echo "[3/4] bridge.py を起動中..."
 cd "$SCRIPT_DIR/backend"
 
-echo "[3/3] 起動完了。Ctrl+C で停止します。"
+echo "[4/4] 起動完了。Ctrl+C で停止します。"
 echo ""
 exec python bridge.py

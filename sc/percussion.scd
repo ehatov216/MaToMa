@@ -2,16 +2,17 @@
 //  MaToMa percussion.scd  — 16ステップパーカッションシーケンサー
 //
 //  【設計コンセプト】
-//    808スタイルのキック・スネア・ハイハット・クラップを基本音源とした
-//    電子パーカッションシーケンサー。
+//    Alva Noto / 池田亮司スタイルの「電子音・合成音・マイクロサウンド」を
+//    基本音源とした電子パーカッションシーケンサー。
+//    「叩く」のではなく「パルス・クリック・瞬間的な波形」を鳴らす哲学。
 //    「制御されたカオス」を実現するために、ステップごとの発火確率と
 //    ユークリッドリズム生成を組み合わせる。
 //
-//  【4つの音源（synthesis_percussion.md コード例ベース）】
-//    0. matoma_perc_kick   — 808スタイル sub + pitch sweep
-//    1. matoma_perc_snare  — noise band + tonal body
-//    2. matoma_perc_hihat  — 複数BPF + HPF（sa_hat_closed参照）
-//    3. matoma_perc_clap   — 4連ノイズバースト（sa_clap参照）
+//  【4つの音源（artist_alvanoto_aesthetics.md 美学ベース）】
+//    0. matoma_perc_kick   — サイン波インパルス + ピッチスウィープ（低音パルス）
+//    1. matoma_perc_snare  — ホワイトノイズ短バースト + BPF（電子「シッ」音）
+//    2. matoma_perc_hihat  — 高周波サイン波クリック（デジタルチック音）
+//    3. matoma_perc_clap   — Impulse + Ringz 金属共鳴パルス（電子ビープ）
 //
 //  【シーケンサー構成】
 //    4トラック × 16ステップ
@@ -111,18 +112,18 @@
 // ══════════════════════════════════════════════════════════════════
 
 // ──────────────────────────────────────────────────────────────────
-// 0. matoma_perc_kick — 808スタイル Sub Kick
+// 0. matoma_perc_kick — Alva Noto スタイル サイン波インパルス
 //
-//    参照: synthesis_percussion.md → sa_kick_808
-//    XLine でピッチをsweepし（高→低）、深いサブを生成。
-//    cutoff で低域の輪郭、res でフィルターの共鳴を調整する。
-//    pitch_env で「尻尾の長さ」（808らしさ）を制御。
-//    reverse=1 でフェードイン→短カットのリバースキックを生成。
+//    美学参照: artist_alvanoto_aesthetics.md → マイクロサウンド・還元主義
+//    サイン波バースト + ピッチスウィープで「クリック感のある低音パルス」を生成。
+//    100ms以下の極めて短い持続時間（マイクロサウンド）。
+//    「叩く」ではなく「電気的な瞬間放電」のイメージ。
+//    reverse=1 でピッチスウィープの方向が反転（低→高のパルス）。
 // ──────────────────────────────────────────────────────────────────
 SynthDef(\matoma_perc_kick, {
-    arg freq      = 50,
-        decay     = 0.9,
-        pitch_env = 0.25,
+    arg freq      = 60,
+        decay     = 0.08,
+        pitch_env = 0.04,
         cutoff    = 4000,
         res       = 0.3,
         amp       = 0.7,
@@ -131,43 +132,49 @@ SynthDef(\matoma_perc_kick, {
         out       = 0;
 
     // var 宣言はすべて関数先頭にまとめる（SCルール）
-    var pitch, sig, env_fwd, env_rev, env, filtered;
+    var freqFwd, freqRev, freq_sig, sig, env_fwd, env_rev, env, filtered;
 
-    // ピッチスイープ: freq * 4.0 からスタートし、decay時間で基音へ落ちる
-    pitch   = XLine.kr(freq * 4.0, freq, pitch_env);
-    sig     = SinOsc.ar(pitch);
+    // 通常方向: 高周波から低周波へのピッチスウィープ（200→60Hz）
+    freqFwd = EnvGen.ar(Env.new([200, freq], [pitch_env], \exp));
+    // リバース方向: 低周波から高周波へ（60→200Hz）
+    freqRev = EnvGen.ar(Env.new([freq, 200], [pitch_env], \exp));
 
-    // 通常エンベロープ: 短アタック → 長ディケイ（sa_kick_808 パターン）
-    env_fwd = EnvGen.ar(Env([0, 1, 0], [0.001, decay]), doneAction: 2);
+    // SelectX でピッチ方向をモーフィング
+    freq_sig = SelectX.ar(reverse.clip(0, 1), [freqFwd, freqRev]);
 
-    // リバースエンベロープ: 長フェードイン → 短カット
-    env_rev = EnvGen.ar(Env([0, 0.8, 1, 0], [decay * 0.8, decay * 0.15, 0.001]), doneAction: 2);
+    sig = SinOsc.ar(freq_sig);
 
-    // SelectX でモーフィング（0=通常, 1=リバース）
+    // 通常エンベロープ: 極めて短い（マイクロサウンド範囲）
+    env_fwd = EnvGen.ar(Env.perc(0.001, decay), doneAction: 2);
+
+    // リバースエンベロープ: フェードイン → 短カット
+    env_rev = EnvGen.ar(Env([0, 0.8, 1, 0], [decay * 0.7, decay * 0.25, 0.001]), doneAction: 2);
+
+    // SelectX でエンベロープ方向をモーフィング（0=通常, 1=リバース）
     env = SelectX.ar(reverse.clip(0, 1), [env_fwd, env_rev]);
 
-    // tanh でソフトクリップ（デジタルクリッピング防止 + サチュレーション感）
-    sig = (sig * env * amp).tanh;
+    sig = sig * env * amp;
 
     // RLPF でカットオフ制御（組み込みフィルター、sc3-plugins不要）
     filtered = RLPF.ar(sig, cutoff.clip(80, 18000), res.linlin(0, 1, 0.05, 1.0));
 
-    Out.ar(out, Pan2.ar(filtered, pan));
+    // 安全制御: Limiter
+    Out.ar(out, Limiter.ar(Pan2.ar(filtered, pan), 0.9));
 }).add;
 
 // ──────────────────────────────────────────────────────────────────
-// 1. matoma_perc_snare — Noise + Tonal Body スネア
+// 1. matoma_perc_snare — Alva Noto スタイル ホワイトノイズ短バースト + BPF
 //
-//    参照: synthesis_percussion.md → sa_snare
-//    2つのサイン波（tone + tone * 1.52）でボディの鳴り、
-//    BPFホワイトノイズでスナッピー感を生成。
-//    cutoff でノイズ帯域の輝きを制御する。
-//    reverse=1 でスネアの「逆さブラシ」質感を生成。
+//    美学参照: artist_alvanoto_aesthetics.md → 純粋な音響素材・グリッチ
+//    非常に短いホワイトノイズバーストをBPFで帯域絞り、「シッ」という
+//    電子的インパルス音を生成。人工的・デジタル的な質感を維持する。
+//    snap はBPFの鋭さ（Qファクター）の制御に転用。
+//    reverse=1 でノイズバーストが「逆から湧き上がる」質感。
 // ──────────────────────────────────────────────────────────────────
 SynthDef(\matoma_perc_snare, {
-    arg tone    = 200,
-        decay   = 0.18,
-        snap    = 0.6,
+    arg tone    = 3000,
+        decay   = 0.04,
+        snap    = 0.3,
         cutoff  = 4000,
         res     = 0.3,
         amp     = 0.5,
@@ -176,48 +183,47 @@ SynthDef(\matoma_perc_snare, {
         out     = 0;
 
     // var 宣言はすべて関数先頭にまとめる
-    var body, noise, sig, env_b, env_n, env_fwd, env_rev, env, filtered;
+    var sig, env_fwd, env_rev, env, filtered;
 
-    // 通常エンベロープ: スナップ感ある二段特性（sa_snare パターン）
+    // 通常エンベロープ: 極めて短いノイズバースト（マイクロサウンド）
     env_fwd = EnvGen.ar(
-        Env([0, 1, 0.5, 0], [0.001, decay * snap, decay * (1 - snap)]),
+        Env.perc(0.001, decay),
         doneAction: 2
     );
 
-    // リバースエンベロープ: フェードイン → 短カット
+    // リバースエンベロープ: フェードイン → 瞬時カット
     env_rev = EnvGen.ar(
-        Env([0, 0.4, 0.9, 1, 0], [decay * 0.5, decay * 0.3, decay * 0.15, 0.001]),
+        Env([0, 0.5, 1, 0], [decay * 0.5, decay * 0.4, 0.001]),
         doneAction: 2
     );
 
     // SelectX でモーフィング
     env = SelectX.ar(reverse.clip(0, 1), [env_fwd, env_rev]);
 
-    // トーナルボディ: 2音のサイン波が短くリング（sa_snare の body 部分）
-    env_b = EnvGen.ar(Env.perc(0.001, decay * 0.5));
-    body  = (SinOsc.ar(tone) + SinOsc.ar(tone * 1.52)) * env_b * 0.4;
+    // BPFでホワイトノイズの帯域を絞る（snap = BPFのrq = 帯域幅の逆数）
+    // snap値が小さいほどQ高く、より「電子的」な音になる
+    sig = BPF.ar(WhiteNoise.ar, tone.clip(500, 12000), snap.linlin(0, 1, 0.05, 0.8)) * env * 3;
 
-    // スナッピーノイズ: BPFで帯域を絞り、エンベロープで「スナップ感」を出す
-    noise = BPF.ar(WhiteNoise.ar, 3500, 0.7) * env;
-
-    sig = (body + noise) * amp;
+    sig = sig * amp;
 
     // RLPF でカットオフ制御
     filtered = RLPF.ar(sig, cutoff.clip(80, 18000), res.linlin(0, 1, 0.05, 1.0));
 
-    Out.ar(out, Pan2.ar(filtered, pan));
+    // 安全制御: Limiter
+    Out.ar(out, Limiter.ar(Pan2.ar(filtered, pan), 0.9));
 }).add;
 
 // ──────────────────────────────────────────────────────────────────
-// 2. matoma_perc_hihat — クローズドハイハット（複数BPF + HPF）
+// 2. matoma_perc_hihat — Alva Noto スタイル 高周波サイン波クリック
 //
-//    参照: synthesis_percussion.md → sa_hat_closed
-//    3バンドのBPFで金属的な共鳴を模倣し、HPFでローを落とす。
-//    cutoff はHPFカットオフに反映し、ハットの「開き具合」を調整。
-//    reverse=1 でシンバルが「逆から消える」質感を生成。
+//    美学参照: artist_alvanoto_aesthetics.md → マイクロサウンド・デジタルノイズ
+//    極めて短いサイン波クリック音。ピッチはLFNoise0でわずかにランダム変動し、
+//    「デジタル的なチック音」「コンピューターの電子音」を生成する。
+//    cutoff でハイパスカットオフを制御。
+//    reverse=1 でクリックが微かに「立ち上がる」方向に変化。
 // ──────────────────────────────────────────────────────────────────
 SynthDef(\matoma_perc_hihat, {
-    arg decay   = 0.06,
+    arg decay   = 0.015,
         cutoff  = 5000,
         res     = 0.3,
         amp     = 0.3,
@@ -228,41 +234,39 @@ SynthDef(\matoma_perc_hihat, {
     // var 宣言はすべて関数先頭にまとめる
     var sig, env_fwd, env_rev, env, filtered;
 
-    // 複数BPFバンドで金属的共鳴をシミュレート（sa_hat_closed のコードから引用）
-    sig = Mix([
-        BPF.ar(WhiteNoise.ar, 8000,  0.3, 1.0),
-        BPF.ar(WhiteNoise.ar, 12000, 0.4, 0.5),
-        BPF.ar(WhiteNoise.ar, 5500,  0.2, 0.3)
-    ]);
-    // HPF でローを落とす（ハットの「金属感」を出す）
-    sig = HPF.ar(sig, cutoff.clip(200, 18000));
+    // 高周波サイン波 + わずかなピッチランダム変動（LFNoise0で「デジタル揺れ」）
+    sig = SinOsc.ar(8000 + (LFNoise0.ar(1) * 2000));
 
-    // 通常エンベロープ: 鋭いアタック → 短いディケイ
+    // 通常エンベロープ: 極限的に短いクリック（マイクロサウンドの核心）
     env_fwd = EnvGen.ar(Env.perc(0.0005, decay), doneAction: 2);
 
-    // リバースエンベロープ: フェードイン → 瞬時カット
+    // リバースエンベロープ: 極めて短い立ち上がり → 瞬時カット
     env_rev = EnvGen.ar(
-        Env([0, 0.6, 1, 0], [decay * 0.7, decay * 0.25, 0.001]),
+        Env([0, 0.7, 1, 0], [decay * 0.6, decay * 0.35, 0.001]),
         doneAction: 2
     );
 
     // SelectX でモーフィング
     env = SelectX.ar(reverse.clip(0, 1), [env_fwd, env_rev]);
 
-    // RLPF でカットオフ制御
-    filtered = RLPF.ar(sig * env, cutoff.clip(80, 18000), res.linlin(0, 1, 0.05, 1.0));
+    sig = sig * env;
 
-    Out.ar(out, Pan2.ar(filtered * amp, pan));
+    // HPF でローを落としてデジタル感を強調
+    filtered = HPF.ar(sig, cutoff.clip(200, 18000));
+
+    // 安全制御: Limiter
+    Out.ar(out, Limiter.ar(Pan2.ar(filtered * amp, pan), 0.9));
 }).add;
 
 // ──────────────────────────────────────────────────────────────────
-// 3. matoma_perc_clap — 4連ノイズバースト クラップ
+// 3. matoma_perc_clap — Alva Noto スタイル Impulse + Ringz 金属共鳴パルス
 //
-//    参照: synthesis_percussion.md → sa_clap
-//    4つの短いWhiteNoiseバーストで「手を打つ複数の面」を模倣（pre）。
-//    BPFボディで残響を加える。
-//    cutoff でボディの帯域を制御する。
-//    reverse=1 でクラップが「逆から湧き上がる」質感を生成。
+//    美学参照: artist_alvanoto_aesthetics.md → 電磁波的・建築的構造・純粋素材
+//    Impulseを励振源としてRingzで金属的瞬間共鳴を生成。
+//    コンピューターのビープ音的な「電子的リング」感。
+//    複数周波数（1200/2400/3600Hz = 倍音列）による建築的構造。
+//    cutoff でRingz出力のLPFカットオフを制御。
+//    reverse=1 で共鳴の立ち上がりが遅くなる（逆から聴こえる）質感。
 // ──────────────────────────────────────────────────────────────────
 SynthDef(\matoma_perc_clap, {
     arg cutoff  = 4000,
@@ -273,42 +277,36 @@ SynthDef(\matoma_perc_clap, {
         out     = 0;
 
     // var 宣言はすべて関数先頭にまとめる
-    var pre, body, sig, env_fwd, env_rev, env, filtered;
+    var exc, sig, env_fwd, env_rev, env, filtered;
 
-    // プリヒット: 4つの短いバーストで「手のカップリング効果」を模倣
-    // Impulse.ar(0, phase) で各バーストの発火タイミングをずらす
-    // sa_clap の Array.fill パターンをそのまま引用
-    pre = Mix(Array.fill(4, { |i|
-        WhiteNoise.ar * EnvGen.ar(
-            Env.perc(0.001, 0.012),
-            Impulse.ar(0, 1 - (i * 0.025))
-        )
-    }));
+    // Impulse を励振源として Ringz に送り込み（金属的瞬間共鳴）
+    // 周波数 1200/2400/3600Hz = 整数倍音列（建築的・幾何学的）
+    exc = Impulse.ar(0);
+    sig = Ringz.ar(exc, [1200, 2400, 3600], 0.08).sum;
 
-    // メインボディ用エンベロープ
-    // 通常: BPFで帯域を絞り、長めのdecayで残響感
-    env_fwd = EnvGen.ar(Env.perc(0.001, 0.14), doneAction: 2);
+    // 通常エンベロープ: Ringzの自然な減衰を活かしつつ全体を制御
+    env_fwd = EnvGen.ar(Env.perc(0.001, 0.12), doneAction: 2);
 
-    // リバース: フェードイン → 瞬時カット
+    // リバースエンベロープ: 共鳴が「逆から湧き上がる」質感
     env_rev = EnvGen.ar(
-        Env([0, 0.5, 1, 0], [0.11, 0.025, 0.001]),
+        Env([0, 0.4, 1, 0], [0.09, 0.025, 0.001]),
         doneAction: 2
     );
 
-    // SelectX でモーフィング
+    // SelectX でモーフィング（0=通常, 1=リバース）
     env = SelectX.ar(reverse.clip(0, 1), [env_fwd, env_rev]);
 
-    body = BPF.ar(WhiteNoise.ar, 1800, 0.8) * env;
-    sig  = (pre * 0.3 + body) * amp;
+    sig = sig * env * amp;
 
     // RLPF でカットオフ制御
     filtered = RLPF.ar(sig, cutoff.clip(80, 18000), res.linlin(0, 1, 0.05, 1.0));
 
-    Out.ar(out, Pan2.ar(filtered, pan));
+    // 安全制御: Limiter
+    Out.ar(out, Limiter.ar(Pan2.ar(filtered, pan), 0.9));
 }).add;
 
 s.sync;
-"SynthDef定義完了: \\matoma_perc_kick, \\matoma_perc_snare, \\matoma_perc_hihat, \\matoma_perc_clap".postln;
+"SynthDef定義完了 (Alva Noto スタイル): \\matoma_perc_kick, \\matoma_perc_snare, \\matoma_perc_hihat, \\matoma_perc_clap".postln;
 
 // ══════════════════════════════════════════════════════════════════
 // ■ STEP 3: ユークリッドリズム生成関数

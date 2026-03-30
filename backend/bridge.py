@@ -29,10 +29,18 @@ from pythonosc.osc_server import AsyncIOOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
 
 from autonomous import AutonomousMode, ChaosEngine
+from param_mapper import (
+    chaos_to_internal,
+    density_to_internal,
+    mutation_prob_from_chaos,
+    tension_to_internal,
+    trig_prob_from_density,
+)
 from scenes import get_scene, scene_to_osc_messages
 from sequencer import TuringSequencer
 from tidal_controller import TidalController
 from tidal_patterns import make_chord_pattern, make_arp_pattern, make_drum_pattern
+from turing_gene import TuringGene
 
 
 def _coreaudio_lib():
@@ -170,6 +178,9 @@ tidal: Optional[TidalController] = None
 # Turing Machine ステップシーケンサー
 sequencer: Optional[TuringSequencer] = None
 
+# Layer B: チューリング遷伝子（シフトレジスタ変异型Pitchシーケンサー）
+turing_gene: Optional[TuringGene] = None
+
 # SC プロセス
 sc_process = None
 
@@ -206,24 +217,19 @@ async def start_sc() -> bool:
     subprocess.run(["pkill", "-f", "scsynth"], capture_output=True)
     await asyncio.sleep(1.5)
 
-    # ── audio_device.txt に保存されたデバイスを起動前に適用 ─────────────
-    # known_issues.md 問題0: SCがZoom/rekordbox仮想デバイスに出力する問題の対策。
-    # audio_device.txt にデバイス名が保存されていれば、macOS システムデフォルトを
-    # 変更してから SC を起動する。これにより SC は正しいデバイスを使う。
+    # ── デバイス設定はSC側（s.options.outDevice）で行う ──────────────────
+    # audio_device.txt のデバイス名は run_headless.scd が直接読んで
+    # s.options.outDevice に設定する。Python 側では macOS システムデフォルトを
+    # 変更しない（変更すると他アプリのストリームがリセットされるため）。
     config_path = Path(__file__).parent / "audio_device.txt"
     if config_path.exists():
         saved_device = config_path.read_text(encoding="utf-8").strip()
         if saved_device:
-            log.info(f"保存済みオーディオデバイスを適用: {saved_device!r}")
-            ok = set_system_audio_output_device(saved_device)
-            if ok:
-                log.info(f"  → macOS システムデフォルト出力を {saved_device!r} に変更しました")
-            else:
-                log.warning(f"  → デバイス変更失敗（デバイスが接続されていない可能性）: {saved_device!r}")
+            log.info(f"デバイス設定: SC が起動時に '{saved_device}' を使用します（audio_device.txt）")
         else:
-            log.info("audio_device.txt が空 → システムデフォルトのデバイスを使用")
+            log.info("audio_device.txt が空 → SC はシステムデフォルトを使用")
     else:
-        log.info("audio_device.txt なし → システムデフォルトのデバイスを使用")
+        log.info("audio_device.txt なし → SC はシステムデフォルトを使用")
 
     sclang = find_sclang()
     if not sclang:
@@ -289,18 +295,35 @@ async def _pipe_sc_output(proc):
 
 
 async def broadcast(message: dict) -> None:
-    """接続中の全ブラウザにJSONを送る。"""
+    """接続中の全ブラウザにJSONを送る。切断済みクライアントは自動除去する。"""
     if not connected_clients:
         return
     data = json.dumps(message, ensure_ascii=False)
-    await asyncio.gather(
-        *(ws.send(data) for ws in connected_clients),
-        return_exceptions=True,
-    )
+    disconnected: set = set()
+    for ws in list(connected_clients):
+        try:
+            await ws.send(data)
+        except Exception:
+            disconnected.add(ws)
+    if disconnected:
+        connected_clients.difference_update(disconnected)
+        log.info(
+            f"切断クライアント除去: {len(disconnected)}件"
+            f" 残={len(connected_clients)}件"
+        )
 
 
 def on_osc_message(address: str, *args) -> None:
     """SCからのOSCメッセージを受け取りブラウザへ転送する。"""
+    global sc_ready
+    try:
+        _handle_osc_message(address, *args)
+    except Exception as e:
+        log.error(f"on_osc_message エラー: {address} {e}")
+
+
+def _handle_osc_message(address: str, *args) -> None:
+    """on_osc_message の実処理（例外はon_osc_message側でキャッチ）。"""
     global sc_ready
 
     if address == "/matoma/audio/devices":
@@ -408,6 +431,9 @@ async def ws_handler(websocket) -> None:
                         # ChaosEngine の引力点をシーンに合わせて更新する
                         if chaos_engine is not None:
                             chaos_engine.set_scene(scene)
+                        # TuringGene: DNAを新シーンに切替（山/void等に名前変更済み）
+                        if turing_gene is not None:
+                            turing_gene.set_scene_dna(scene_name)
                         await broadcast({"type": "scene_changed", "scene": scene})
                         log.info(f"シーン切り替え: {scene_name}")
                     else:
@@ -521,21 +547,17 @@ async def ws_handler(websocket) -> None:
 
                 elif address == "/matoma/audio/set_device":
                     device_name = str(args[0]) if args else ""
-                    # SC の unixCmd はスペース含みデバイス名を壊すため、
-                    # bridge.py が CoreAudio 経由で macOS システムデフォルトを変更する。
-                    # SC は outDevice=nil でシステムデフォルトを使う設計。
+                    # デバイス名を audio_device.txt に保存する。
+                    # SC を再起動すると run_headless.scd がこのファイルを読み
+                    # s.options.outDevice に設定する（macOS システム設定は変更しない）。
                     if device_name:
-                        set_system_audio_output_device(device_name)
-                        # ── 選択したデバイスを audio_device.txt に永続化 ──────────
-                        # 次回起動時にも同じデバイスが使われるようにする。
-                        # （start_sc() 冒頭でこのファイルを読んで適用する）
                         try:
                             config_path = Path(__file__).parent / "audio_device.txt"
                             config_path.write_text(device_name, encoding="utf-8")
                             log.info(f"audio_device.txt に保存: {device_name!r}")
                         except Exception as e:
                             log.warning(f"audio_device.txt 保存失敗: {e}")
-                    log.info(f"音声デバイス切替 → システムデフォルト変更: {device_name!r}")
+                    log.info(f"音声デバイス切替: {device_name!r} → SC を再起動して適用")
                     await broadcast({
                         "type": "sc_booting",
                         "message": f"デバイス「{device_name or 'デフォルト'}」へ切替のため SC を再起動中...",
@@ -550,6 +572,36 @@ async def ws_handler(websocket) -> None:
 
                 elif address.startswith("/matoma/seq/"):
                     await _handle_seq(address, args, websocket)
+
+                elif address.startswith("/matoma/turing/"):
+                    await _handle_turing(address, args, websocket)
+
+                elif address.startswith("/matoma/flute/"):
+                    await _handle_flute(address, args, websocket)
+
+                elif address == "/matoma/drop/state" and args:
+                    drop_state = str(args[0])
+                    sc_client.send_message(address, args)
+                    await broadcast(
+                        {"type": "drop_changed", "state": drop_state}
+                    )
+                    log.info(f"DROP: {drop_state}")
+
+                elif address == "/matoma/energy/set" and args:
+                    sc_client.send_message(address, args)
+                    await broadcast(
+                        {"type": "energy_changed", "value": float(args[0])}
+                    )
+                    log.info(f"ENERGY: {args[0]}")
+
+                elif address == "/matoma/master/amp" and args:
+                    amp = float(args[0])
+                    for osc_addr in [
+                        "/matoma/drone/param",
+                        "/matoma/granular/param",
+                    ]:
+                        sc_client.send_message(osc_addr, ["amp", amp])
+                    log.info(f"MASTER amp: {amp}")
 
                 elif address.startswith("/matoma/spectral/"):
                     # スペクトルシンセはそのままSCへ転送する
@@ -580,6 +632,9 @@ async def ws_handler(websocket) -> None:
 
 async def _handle_tidal(address: str, args: list, websocket) -> None:
     """Tidal関連のWebSocketメッセージを処理する。"""
+    if tidal is None:
+        log.warning("TidalController未初期化")
+        return
     sub = address[len("/matoma/tidal/"):]
 
     if sub == "start":
@@ -672,6 +727,9 @@ async def _handle_tidal(address: str, args: list, websocket) -> None:
 
 async def _handle_seq(address: str, args: list, websocket) -> None:
     """シーケンサー関連の WebSocket メッセージを処理する。"""
+    if sequencer is None:
+        log.warning("TuringSequencer未初期化")
+        return
     sub = address[len("/matoma/seq/"):]
 
     if sub == "start":
@@ -686,6 +744,8 @@ async def _handle_seq(address: str, args: list, websocket) -> None:
 
     elif sub == "bpm" and args:
         sequencer.set_bpm(float(args[0]))
+        if turing_gene is not None:
+            turing_gene.set_bpm(float(args[0]))
         log.info(f"seq BPM: {args[0]}")
 
     elif sub == "step_div" and args:
@@ -710,6 +770,62 @@ async def _handle_seq(address: str, args: list, websocket) -> None:
         await websocket.send(
             json.dumps({"type": "seq_state", "state": sequencer.get_state()})
         )
+
+
+async def _handle_turing(address: str, args: list, websocket) -> None:
+    """チューリング遺伝子のWS制御を処理する。"""
+    sub = address[len("/matoma/turing/"):]
+
+    if sub == "start":
+        if turing_gene is not None:
+            await turing_gene.start()
+        state = turing_gene.get_state() if turing_gene else {}
+        await broadcast({"type": "turing_state", "state": state})
+        log.info("TuringGene 開始")
+
+    elif sub == "stop":
+        if turing_gene is not None:
+            await turing_gene.stop()
+        state = turing_gene.get_state() if turing_gene else {}
+        await broadcast({"type": "turing_state", "state": state})
+        log.info("TuringGene 停止")
+
+    elif sub == "state":
+        state = turing_gene.get_state() if turing_gene is not None else {}
+        await websocket.send(
+            json.dumps({"type": "turing_state", "state": state})
+        )
+
+
+async def _handle_flute(address: str, args: list, _websocket) -> None:
+    """3本の笛（CHAOS/DENSITY/TENSION）をOSC展開してSCへ送信する。"""
+    sub = address[len("/matoma/flute/"):]
+    if not args:
+        return
+    value = float(args[0])
+
+    if sub == "chaos":
+        for osc_addr, osc_args in chaos_to_internal(value):
+            sc_client.send_message(osc_addr, osc_args)
+        if turing_gene is not None:
+            turing_gene.set_mutation_prob(mutation_prob_from_chaos(value))
+        log.info(f"Flute CHAOS={value:.2f}")
+
+    elif sub == "density":
+        for osc_addr, osc_args in density_to_internal(value):
+            sc_client.send_message(osc_addr, osc_args)
+        if sequencer is not None:
+            sequencer.set_trig_prob(trig_prob_from_density(value))
+        log.info(f"Flute DENSITY={value:.2f}")
+
+    elif sub == "tension":
+        for osc_addr, osc_args in tension_to_internal(value):
+            sc_client.send_message(osc_addr, osc_args)
+        log.info(f"Flute TENSION={value:.2f}")
+
+    elif sub == "brightness":
+        sc_client.send_message("/matoma/drone/param", ["brightness", value])
+        log.info(f"Flute BRIGHTNESS={value:.2f}")
 
 
 async def _convert_mp3_to_wav(src_path: str) -> str | None:
@@ -820,7 +936,7 @@ def _release_pid_lock() -> None:
 
 async def main() -> None:
     """OSCサーバーとWebSocketサーバーを同時に起動する。"""
-    global autonomous, chaos_engine, tidal, sequencer
+    global autonomous, chaos_engine, tidal, sequencer, turing_gene
 
     _acquire_pid_lock()
     await asyncio.sleep(0.8)  # 旧プロセスの終了を待つ（イベントループをブロックしない）
@@ -830,6 +946,7 @@ async def main() -> None:
     tidal = TidalController()
     autonomous.set_tidal(tidal)
     sequencer = TuringSequencer(sc_client.send_message, broadcast)
+    turing_gene = TuringGene(sc_client.send_message, broadcast)
 
     disp = Dispatcher()
     disp.set_default_handler(on_osc_message)

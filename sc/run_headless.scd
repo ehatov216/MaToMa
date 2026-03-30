@@ -43,23 +43,42 @@ thisProcess.openUDPPort(57200);
 // GVerb 等の大型UGen に必要な RTメモリ（デフォルト 8MB → 128MB）
 s.options.memSize = 131072;
 
+// 入力デバイスを無効化（マイクと出力デバイスのサンプルレート不一致でscsynth がクラッシュするのを防ぐ）
+// 例: 入力48000Hz / 出力44100Hz の環境では "could not initialize audio" エラーが発生する
+s.options.numInputBusChannels = 0;
+
 // ── オーディオデバイス設定 ───────────────────────────────────────────
 //
 // 【設計方針】
-// s.options は一切変更しない（= すべてデフォルト値）。
+// audio_device.txt に保存済みデバイス名があれば s.options.outDevice に設定する。
+// Python 側では macOS システムデフォルトを変更しない。
 //
 // 理由:
-//   s.options.numInputBusChannels = 0 や sampleRate = 44100 など
-//   デフォルト以外の値を設定すると、scsynth の起動・再起動時に
-//   CoreAudio がデバイスを再設定する。この再設定の瞬間に
-//   他アプリ（Music.app, Zoom 等）の音声ストリームが中断される。
+//   Python が AudioObjectSetPropertyData で macOS のシステムデフォルト出力を
+//   変更すると、CoreAudio が全アプリに「デバイスが変わった」と通知し、
+//   Spotify / Music.app 等の音声ストリームが一斉にリセットされる。
 //   （macOS Sequoia での実測により確認）
 //
-// MaToMa は音声入力を使わないが、入力チャンネル数を 0 に強制すると
-// 上記の問題が起きるため、デフォルト（2ch）のままにする。
-// 入力バスは確保されるが、使用しなければ音には影響しない。
+//   s.options.outDevice は scsynth だけが使うデバイスを指定する API であり、
+//   macOS システム設定を変更しないため他アプリのストリームに影響しない。
 //
-"出力デバイス: (macOS システムデフォルト)".postln;
+// 注意: sampleRate は設定しない（システムネイティブレートを使う）。
+//       numInputBusChannels = 0 は上部で設定済み（マイク/出力のレート不一致クラッシュ対策）。
+//
+{
+    var deviceFilePath = ~matomaScDir +/+ "../backend/audio_device.txt";
+    if (File.exists(deviceFilePath)) {
+        var content = File.readAllString(deviceFilePath).stripWhiteSpace;
+        if (content.size > 0) {
+            s.options.outDevice = content;
+            "出力デバイス: '%' (audio_device.txt より設定)".format(content).postln;
+        } {
+            "出力デバイス: (macOS システムデフォルト・audio_device.txt は空)".postln;
+        };
+    } {
+        "出力デバイス: (macOS システムデフォルト・audio_device.txt なし)".postln;
+    };
+}.value;
 
 s.waitForBoot({
     "SCサーバー起動完了".postln;
@@ -93,8 +112,19 @@ s.waitForBoot({
     ~droneBus  = Bus.audio(s, 2);
     ~effectBus = Bus.audio(s, 2);
 
+    // ── Organic Coupling 用コントロールバス ─────────────────────────
+    // ~centroidBus : ドローンの「明るさ」（0=暗い 〜 1=明るい）
+    //                matoma_analyser が 2秒平滑化した値を書き込む
+    // ~couplingBus : 連動強度（0=完全独立 〜 1=完全オーガニック）
+    //                シーン切り替えで /matoma/coupling OSC から書き込まれる
+    ~centroidBus = Bus.control(s, 1);
+    ~couplingBus = Bus.control(s, 1);
+    ~couplingBus.set(0.0);  // デフォルト: 独立（既存の動作を維持）
+
     "共有バス確保完了: ~droneBus=%, ~effectBus=%".format(
         ~droneBus, ~effectBus).postln;
+    "Organic Couplingバス確保完了: ~centroidBus=%, ~couplingBus=%".format(
+        ~centroidBus, ~couplingBus).postln;
 
     // ══════════════════════════════════════════════════════════════
     // ■ STEP 2: DRONE v3 — 自己組織化フィードバックネットワーク型
@@ -128,98 +158,119 @@ s.waitForBoot({
             shimmer      = 0.5,
             room         = 0.75,
             amp          = 0.35,
-            atk          = 4.0,   // アタック時間（再セットアップ時は短くできる）
+            atk          = 4.0,
+            brightness   = 0.5,
             gate         = 1;
 
-        // var 宣言はすべて先頭にまとめる（SC のルール）
-        var noise, fb, klankedL, klankedR, klanked;
+        var noise, klankedL, klankedR, klanked;
         var delayed, warmth, saturated;
         var pitchShifted, shimmered;
-        var env, sig;
+        var env, sig, cutoff;
+        var feedback_smooth, shimmer_smooth, room_smooth;
+
+        // ── パラメータースムージング ─────────────────────────────────
+        feedback_smooth = feedback_amt.lag(0.3);
+        shimmer_smooth  = shimmer.lag(0.2);
+        room_smooth     = room.lag(0.3);
 
         // ── PinkNoise: 共鳴の「種」 ──────────────────────────────────
-        // 自然界に近いスペクトル分布 → Klank が「自然に育つ音」に変換する
         noise = PinkNoise.ar(0.12);
 
-        // ── LocalIn: 自己組織化フィードバックの入口 ──────────────────
-        // rumush パターン: 前サンプルの信号を取り込んで自己組織化する
-        fb = LocalIn.ar(2);
-
-        // ── Klank: 倍音フィルターバンク 6本（胴鳴り） ───────────────
-        // 非整数倍音 6本 = 「空気の塊」的な質感。旧5本から拡張。
-        // L チャンネル: 基音重視の配置
+        // ── Klank: 倍音フィルターバンク 6本 ─────────────────────────
+        // LocalIn/LocalOut フィードバックは起動直後に発散→サーバー保護が
+        // 全出力をミュートするため削除。AllpassC の連鎖で代替する。
         klankedL = Klank.ar(`[
             [freq,        freq * 1.501, freq * 2.756, freq * 3.999, freq * 5.404, freq * 7.102],
             [1.0,         0.7,          0.5,          0.3,          0.15,         0.08],
-            [4.0,         3.0,          2.0,          1.5,          1.0,          0.7]
-        ], noise + (fb[0] * feedback_amt.clip(0, 0.75)));
+            [5.0,         3.5,          2.2,          1.2,          0.6,          0.3]
+        ], noise);
 
-        // R チャンネル: わずかに異なる比率でステレオ感
         klankedR = Klank.ar(`[
             [freq * 1.003, freq * 1.504, freq * 2.759, freq * 4.003, freq * 5.408, freq * 7.106],
             [0.9,          0.65,         0.45,         0.27,         0.13,         0.07],
-            [4.1,          3.1,          2.1,          1.55,         1.05,         0.75]
-        ], noise + (fb[1] * feedback_amt.clip(0, 0.75)));
+            [5.1,          3.6,          2.25,         1.25,         0.65,         0.35]
+        ], noise);
 
         klanked = [klankedL, klankedR];
 
-        // ── AllpassC: ランダムなオールパスで有機的変化（ビルトインのみ）──
-        // FreqShift(sc3-plugins依存)の代わりに AllpassC で変化を生成
-        // LFNoise1 で遅延時間をゆっくり変化させることで音が生き物のように動く
-        delayed = klanked + AllpassC.ar(
+        // ── AllpassC 連鎖: フィードバック感・有機的変化 ──────────────
+        // feedback_smooth で深さを制御。Limiter で発散を防ぐ。
+        delayed = klanked;
+        delayed = delayed + (AllpassC.ar(
             klanked, 0.15,
-            LFNoise1.kr([0.07, 0.09]).range(0.02, 0.12),
-            3.0
-        );
+            LFNoise1.kr([0.07, 0.09]).range(0.02, 0.12), 3.0
+        ) * feedback_smooth.clip(0, 0.6));
         delayed = delayed + DelayC.ar(
             klanked, 0.25,
             LFNoise2.kr([0.03, 0.05]).range(0.01, 0.08)
         );
-        // HPF: DCオフセット除去
         delayed = HPF.ar(delayed, 40);
+        delayed = Limiter.ar(delayed, 0.9);
 
-        // ── LocalOut: フィードバックの出口 ───────────────────────────
-        LocalOut.ar(delayed * feedback_amt * 1.5);
-
-        // ── Resonz + tanh: 体鳴り・温かみ追加 ───────────────────────
-        // a_loss_of_self パターン準拠:
-        //   (sig * 0.75) + (Resonz.ar(sig, freq, 0.15) * 1.125)
-        // klanked 信号に Resonz を混ぜて「胴鳴り」感を追加
+        // ── Resonz + tanh: 温かみ追加 ────────────────────────────────
         warmth    = Resonz.ar(klanked, freq * 1.001, 0.18) * 0.9;
-        saturated = LeakDC.ar(((klanked + warmth) * 2.2).tanh) * 0.5;
+        saturated = LeakDC.ar((delayed + warmth) * 1.8).tanh * 0.5;
 
         // ── Shimmer Reverb ────────────────────────────────────────────
-        // リバーブ尾部をオクターブ上にピッチシフト → 浮遊感・広がり
         pitchShifted = PitchShift.ar(saturated, 0.1, 2.0, 0.01, 0.005);
         shimmered = [
-            saturated[0] + (pitchShifted[0] * shimmer.clip(0, 1.0)),
-            saturated[1] + (pitchShifted[1] * shimmer.clip(0, 1.0))
+            saturated[0] + (pitchShifted[0] * shimmer_smooth.clip(0, 1.0)),
+            saturated[1] + (pitchShifted[1] * shimmer_smooth.clip(0, 1.0))
         ];
 
-        // ── エンベロープ: attack 4秒 / release 8秒 ──────────────────
+        // ── エンベロープ ──────────────────────────────────────────────
         env       = EnvGen.ar(Env.adsr(atk, 0.3, 0.88, 8.0), gate, doneAction: 2);
         shimmered = shimmered * env;
 
-        // ── ~droneBus: Granular 用ウェット素材として書き出す ─────────
+        // ── BRIGHTNESS: RLPF で音色の明暗を制御 ──────────────────────────
+        // 0.0（暗い・200Hz） → 1.0（明るい・8000Hz）
+        cutoff = brightness.lag(0.3).linexp(0.0, 1.0, 200, 8000);
+        shimmered = RLPF.ar(shimmered, cutoff, 0.7);
+
+        // ── ~droneBus: Granular 用 ────────────────────────────────────
         Out.ar(~droneBus, shimmered);
 
         // ── FreeVerb2: 最終空間演出 ──────────────────────────────────
-        // room 0.0→0.45, room 1.0→0.92 にマップ（広いレンジで効果が出る）
         sig = FreeVerb2.ar(
             shimmered[0], shimmered[1],
-            mix:  room.linlin(0.0, 1.0, 0.45, 0.92),
-            room: room.linlin(0.0, 1.0, 0.60, 0.95),
-            damp: room.linlin(0.0, 1.0, 0.55, 0.12)
+            mix:  room_smooth.linlin(0.0, 1.0, 0.45, 0.92),
+            room: room_smooth.linlin(0.0, 1.0, 0.60, 0.95),
+            damp: room_smooth.linlin(0.0, 1.0, 0.55, 0.12)
         );
 
-        // ~effectBus にも送って Granular と合流させる
-        Out.ar(~effectBus, sig * 0.8);
-
+        Out.ar(~effectBus, Limiter.ar(sig * 0.8, 0.95));
         Out.ar(0, sig * amp);
     }).add;
 
     s.sync;
     "SynthDef定義完了: \\matoma_drone (v3 自己組織化フィードバックネットワーク型)".postln;
+
+    // ══════════════════════════════════════════════════════════════
+    // ■ Organic Coupling: ドローン明るさ解析器
+    //
+    //   ~droneBus の低域エネルギー vs 高域エネルギーの比を測定し、
+    //   「明るさ（0=暗い 1=明るい）」として ~centroidBus に書き込む。
+    //
+    //   明るさの意味:
+    //     0 = ドローンが低域主体（暗く重い） → Granular は疎な粒（ambient的）
+    //     1 = ドローンが高域主体（明るく輝く）→ Granular は密な粒（texture的）
+    //
+    //   Lag.kr(2.0): 急な変化でなく、2秒かけてゆっくり追従する。
+    // ══════════════════════════════════════════════════════════════
+    SynthDef(\matoma_analyser, {
+        arg inBus;
+        var mono       = In.ar(inBus, 2).sum;
+        var lowEnergy  = LPF.ar(mono, 1000).squared;
+        var highEnergy = HPF.ar(mono, 1000).squared;
+        // 高域比率 = ドローンの「明るさ」（0〜1）
+        var brightness = highEnergy / (lowEnergy + highEnergy + 1e-8);
+        Out.kr(~centroidBus, Lag.ar(brightness, 2.0));
+    }).add;
+
+    s.sync;
+    "SynthDef定義完了: \\matoma_analyser (Organic Coupling 明るさ解析器)".postln;
+
+    ~currentAnalyser = nil;
 
     // ── Drone グローバル変数 ─────────────────────────────────────────
     ~currentDrone = nil;
@@ -256,7 +307,7 @@ s.waitForBoot({
         var value = msg[2].asFloat;
         // 許可リスト: 想定外のシンボルでSynth内部パラメーターを書き換えられないようにする
         var allowed = #[\freq_norm, \freq, \feedback_amt, \shimmer,
-                        \room, \amp, \detune, \drift, \chaos, \cutoff, \gate];
+                        \room, \amp, \detune, \drift, \chaos, \cutoff, \brightness, \gate];
         {
             if (allowed.includes(param).not) {
                 "ドローン param: 許可されていないパラメーター '%' を無視".format(param).postln;
@@ -370,25 +421,36 @@ s.waitForBoot({
         RecordBuf.ar(sig, buf, loop: 1, trigger: 1, doneAction: 0);
     }).add;
 
-    // グラニュラー合成器（norns silo_grain パターン）
+    // グラニュラー合成器（norns silo_grain パターン + Organic Coupling）
     SynthDef(\matoma_granular, {
-        arg buf       = 0,
-            density   = 20,
-            spray     = 0.3,   // 0=Impulse(規則的) 1=Dust(ランダム)
-            pos       = 0.5,
-            size      = 0.12,
-            jitter    = 0.08,
-            room      = 0.5,
-            amp       = 0.5,
-            gate      = 1,
-            outBus    = 0;
+        arg buf            = 0,
+            density        = 20,
+            spray          = 0.3,   // 0=Impulse(規則的) 1=Dust(ランダム)
+            pos            = 0.5,
+            size           = 0.12,
+            jitter         = 0.08,
+            room           = 0.5,
+            amp            = 0.5,
+            gate           = 1,
+            outBus         = 0,
+            centroidBusIdx = 0,    // ~centroidBus.index（ドローン明るさ）
+            couplingBusIdx = 0;    // ~couplingBus.index（連動強度 0〜1）
 
         var trig_regular, trig_random, trig, grainPos;
         var sig, wet, env;
 
+        // ── Organic Coupling: density のブレンド ────────────────────
+        // brightness: ドローンの高域比率（0=暗い 1=明るい）
+        // organic_density: 明るいドローン→高密度 / 暗いドローン→低密度
+        // actual_density: coupling=0 なら手動値のみ / coupling=1 なら完全オーガニック
+        var brightness      = In.kr(centroidBusIdx).clip(0.0, 1.0);
+        var organic_density = brightness.linlin(0.0, 1.0, 4, 55);
+        var coupling        = In.kr(couplingBusIdx).clip(0.0, 1.0);
+        var actual_density  = density * (1 - coupling) + organic_density * coupling;
+
         // spray: SelectX.kr でクロスフェード（norns silo_grain パターン）
-        trig_regular = Impulse.kr(density);
-        trig_random  = Dust.kr(density);
+        trig_regular = Impulse.kr(actual_density);
+        trig_random  = Dust.kr(actual_density);
         trig         = SelectX.kr(spray, [trig_regular, trig_random]);
 
         // pos を中心に LFNoise0 で揺らす（jitter）
@@ -441,11 +503,14 @@ s.waitForBoot({
         {
             if (~currentGranular.notNil) { ~currentGranular.set(\gate, 0); };
             ~currentGranular = Synth(\matoma_granular, [
-                \buf,    ~granularRingBuf.bufnum,
-                \outBus, ~effectBus.index
+                \buf,            ~granularRingBuf.bufnum,
+                \outBus,         ~effectBus.index,
+                \centroidBusIdx, ~centroidBus.index,
+                \couplingBusIdx, ~couplingBus.index
             ], addAction: \addToTail);
-            "グラニュラー開始 (ringBuf: %, outBus: %)".format(
-                ~granularRingBuf.bufnum, ~effectBus.index).postln;
+            "グラニュラー開始 (ringBuf: %, outBus: %, coupling: %)".format(
+                ~granularRingBuf.bufnum, ~effectBus.index,
+                ~couplingBus.getSynchronous.round(0.01)).postln;
         }.defer;
     }, '/matoma/granular/start', nil, 57200);
 
@@ -459,6 +524,19 @@ s.waitForBoot({
             };
         }.defer;
     }, '/matoma/granular/stop', nil, 57200);
+
+    // OSCdef: Organic Coupling 強度設定
+    // msg 形式: ['/matoma/coupling', 値(0.0〜1.0)]
+    // シーン切り替え時に scenes.py が自動送信する。
+    // 0.0 = 完全独立（既存の動作）/ 1.0 = 完全オーガニック
+    OSCdef(\matoma_coupling, { |msg|
+        var value = msg[1].asFloat.clip(0.0, 1.0);
+        {
+            ~couplingBus.set(value);
+            "Organic Coupling 設定: % (0=独立 / 1=完全連動)".format(
+                value.round(0.01)).postln;
+        }.defer;
+    }, '/matoma/coupling', nil, 57200);
 
     // OSCdef: Granular パラメーター
     // density, spray, pos, size, room, amp を動的変更可能
@@ -543,7 +621,14 @@ s.waitForBoot({
     OSCdef(\matoma_spectral_param, { |msg|
         var param = msg[1].asSymbol;
         var value = msg[2].asFloat;
-        { if (~currentSpectral.notNil) { ~currentSpectral.set(param, value); }; }.defer;
+        var allowed = #[\freq, \smear, \bits, \rate, \chaos, \amp];
+        {
+            if (allowed.includes(param).not) {
+                "spectral/param: 許可されていないパラメーター '%' を無視".format(param).postln;
+            } {
+                if (~currentSpectral.notNil) { ~currentSpectral.set(param, value); };
+            };
+        }.defer;
     }, '/matoma/spectral/param', nil, 57200);
 
     // ══════════════════════════════════════════════════════════════
@@ -651,34 +736,42 @@ s.waitForBoot({
 
     // Effect パススルー（~effectBus → ハード出力）
     // エフェクトが何も起動していなくても ~effectBus の音が聞こえるようにする
+    // 最終防衛線: LeakDC で DC 除去 → Limiter で音量を 0.9 以下に制限
     SynthDef(\matoma_effect_out, {
         arg inBus, out = 0, amp = 1.0;
         var sig = In.ar(inBus, 2);
-        Out.ar(out, sig * amp);
+        sig = LeakDC.ar(sig);
+        sig = Limiter.ar(sig * amp, 0.9, 0.01);
+        Out.ar(out, sig);
     }).add;
 
     s.sync;
 
     // エフェクトグローバル変数
+    ~effectGroup        = nil;
     ~currentDelay       = nil;
     ~currentSpectralFrz = nil;
     ~currentWavefolder  = nil;
     ~currentFeedback    = nil;
 
     // パススルーを起動（常駐・必須）
-    // これがないと ~effectBus の信号が Out(0) に届かない
+    // ~effectGroup を作成し、その中の末尾に EffectOut を配置する。
+    // 各エフェクト（Delay等）は EffectOut の直前（addBefore）に挿入されるので
+    // 実行順序が「音源 → エフェクト群 → EffectOut(LeakDC+Limiter)」に固定される。
+    ~effectGroup    = Group.new;
     ~currentEffectOut = Synth(\matoma_effect_out, [
         \inBus, ~effectBus,
         \out, 0
-    ], addAction: \addToTail);
-    "エフェクトパススルー起動: ~effectBus → Out(0)".postln;
+    ], target: ~effectGroup, addAction: \addToTail);
+    "エフェクトパススルー起動: ~effectBus → Out(0) [effectGroup末尾]".postln;
 
     // Effect OSCdef: Delay
     OSCdef(\matoma_delay_start, { |msg|
         {
             if (~currentDelay.notNil) { ~currentDelay.free; };
+            // addBefore: EffectOut(LeakDC+Limiter) の直前に挿入 → 実行順序保証
             ~currentDelay = Synth(\matoma_delay, [\inBus, ~effectBus, \out, 0],
-                addAction: \addToTail);
+                target: ~currentEffectOut, addAction: \addBefore);
             "ディレイ開始".postln;
         }.defer;
     }, '/matoma/effect/delay/start', nil, 57200);
@@ -708,7 +801,8 @@ s.waitForBoot({
         {
             if (~currentSpectralFrz.notNil) { ~currentSpectralFrz.free; };
             ~currentSpectralFrz = Synth(\matoma_spectral_freeze,
-                [\inBus, ~effectBus, \out, 0], addAction: \addToTail);
+                [\inBus, ~effectBus, \out, 0],
+                target: ~currentEffectOut, addAction: \addBefore);
             "スペクトラルフリーズ開始".postln;
         }.defer;
     }, '/matoma/effect/spectral/start', nil, 57200);
@@ -732,7 +826,8 @@ s.waitForBoot({
         {
             if (~currentWavefolder.notNil) { ~currentWavefolder.free; };
             ~currentWavefolder = Synth(\matoma_wavefolder,
-                [\inBus, ~effectBus, \out, 0], addAction: \addToTail);
+                [\inBus, ~effectBus, \out, 0],
+                target: ~currentEffectOut, addAction: \addBefore);
             "ウェーブフォルダー開始".postln;
         }.defer;
     }, '/matoma/effect/wavefolder/start', nil, 57200);
@@ -754,7 +849,8 @@ s.waitForBoot({
         {
             if (~currentFeedback.notNil) { ~currentFeedback.free; };
             ~currentFeedback = Synth(\matoma_feedback_loop,
-                [\inBus, ~effectBus, \out, 0], addAction: \addToTail);
+                [\inBus, ~effectBus, \out, 0],
+                target: ~currentEffectOut, addAction: \addBefore);
             "フィードバックループ開始".postln;
         }.defer;
     }, '/matoma/effect/feedback/start', nil, 57200);
@@ -949,18 +1045,25 @@ s.waitForBoot({
             ~turingProb.round(0.01), ~turingBpm.round(0.1)).postln;
     };
 
-    // OSCdef: 特定音源を即叩く
+    // OSCdef: 特定音源を即叩く（許可リストで安全に制限）
     OSCdef(\matoma_rhythmic_trigger, { |msg|
         var synthName = msg[1].asSymbol;
         var freq = msg[2].asFloat;
         var amp  = msg[3].asFloat;
+        var allowed = #[\matoma_rhythmic_grain, \matoma_rhythmic_klank,
+                        \matoma_rhythmic_fm, \matoma_rhythmic_spring,
+                        \matoma_rhythmic_chaos];
         {
-            var buf = if (synthName == \matoma_rhythmic_grain) {
-                ~rhythmicBuf.bufnum } { 0 };
-            Synth(synthName, [\freq, freq, \amp, amp, \buf, buf,
-                \outBus, ~effectBus.index], addAction: \addToTail);
-            "リズムトリガー: % freq:% amp:%".format(
-                synthName, freq.round(0.1), amp.round(0.01)).postln;
+            if (allowed.includes(synthName).not) {
+                "rhythmic/trigger: 許可されていないSynthDef '%' を無視".format(synthName).postln;
+            } {
+                var buf = if (synthName == \matoma_rhythmic_grain) {
+                    ~rhythmicBuf.bufnum } { 0 };
+                Synth(synthName, [\freq, freq, \amp, amp, \buf, buf,
+                    \outBus, ~effectBus.index], addAction: \addToTail);
+                "リズムトリガー: % freq:% amp:%".format(
+                    synthName, freq.round(0.1), amp.round(0.01)).postln;
+            };
         }.defer;
     }, '/matoma/rhythmic/trigger', nil, 57200);
 
@@ -1044,17 +1147,28 @@ s.waitForBoot({
     // Drone が鳴っていれば素材が録音される。鳴っていなければ無音が録音（害なし）。
     { ~startGranularRecorder.(); }.defer;
 
-    // 2b. Granular シンセ自動スタート（Drone素材をすぐ粒に変換してテクスチャを出す）
+    // 2b. ドローン明るさ解析器 起動（Organic Coupling 用）
+    // ~droneBus の信号を監視して ~centroidBus に書き込む。
+    // coupling=0.0 の間は Granular に影響を与えない（シーンで制御）。
+    {
+        ~currentAnalyser = Synth(\matoma_analyser,
+            [\inBus, ~droneBus.index], addAction: \addToTail);
+        "ドローン明るさ解析器 起動 (Organic Coupling)".postln;
+    }.defer;
+
+    // 2c. Granular シンセ自動スタート（Drone素材をすぐ粒に変換してテクスチャを出す）
     // Recorder が録音を開始してから 2秒後に起動する。
     // この1行がないと GrainBuf は動くが音が一切出ない。
     {
         2.0.wait;
         ~currentGranular = Synth(\matoma_granular, [
-            \buf,     ~granularRingBuf.bufnum,
-            \outBus,  ~effectBus.index,
-            \density, 12,
-            \spray,   0.4,
-            \amp,     0.4
+            \buf,            ~granularRingBuf.bufnum,
+            \outBus,         ~effectBus.index,
+            \density,        12,
+            \spray,          0.4,
+            \amp,            0.4,
+            \centroidBusIdx, ~centroidBus.index,
+            \couplingBusIdx, ~couplingBus.index
         ], addAction: \addToTail);
         "グラニュラー自動スタート (density:12 spray:0.4)".postln;
     }.fork;
@@ -1110,9 +1224,15 @@ s.waitForBoot({
             // 2. 少し待って再起動
             0.5.wait;
             // inBus を必ず渡す（省略するとバス0のフィードバックループが発生）
+            // ~effectGroup を再生成して実行順序を再確立する
+            ~effectGroup      = Group.new;
             ~currentEffectOut = Synth(\matoma_effect_out,
-                [\inBus, ~effectBus, \out, 0], addAction: \addToTail);
+                [\inBus, ~effectBus, \out, 0],
+                target: ~effectGroup, addAction: \addToTail);
             ~startGranularRecorder.();
+            // アナライザーも再起動（Organic Coupling 用）
+            ~currentAnalyser = Synth(\matoma_analyser,
+                [\inBus, ~droneBus.index], addAction: \addToTail);
             0.5.wait;
             // atk=0.5 で素早くフェードイン（通常起動の4秒より短く）
             ~currentDrone = Synth(\matoma_drone, [\atk, 0.5], addAction: \addToHead);

@@ -1,32 +1,60 @@
 # MaToMa 既知の問題と解決策
 
-> 更新日: 2026-03-29
+> 更新日: 2026-03-30
 > 再発防止・最速解決のためのトラブルシューティングログ
 
 ---
 
 ## 🔇 音が出ない問題
 
-### 問題X: MaToMa起動時に他アプリ（Spotify, Music.app等）の音が止まる【根本原因特定済み】
+### 問題Y: LocalIn/LocalOut フィードバックがSCサーバー全体をミュートする【2026-03-30 修正済み】
+
+**症状:** MaToMa起動後にドローンも他アプリ（Spotify等）も一切音が出なくなる
+**根本原因:** `matoma_drone` SynthDef内の `LocalIn/LocalOut` フィードバックループが
+  起動直後に信号が発散し、SCサーバーの音量保護機能（Volume Protection）が
+  全出力をミュートする。これがCoreAudio経由で他アプリの音も止める。
+**修正（2026-03-30）:**
+  - `LocalIn/LocalOut` を完全削除
+  - `AllpassC` 連鎖 + `Limiter(0.9)` でフィードバック感を安全に代替
+  - `feedback_amt` パラメーターは AllpassC のmix量として機能を維持
+**診断手順:**
+  1. シンプルな `{ SinOsc.ar(440) }.play` で音が出るか確認
+  2. `SynthDef` に `LocalIn/LocalOut` を追加した瞬間に無音になるか確認
+  3. 無音になれば本問題
+**教訓:** LocalIn/LocalOut は高いフィードバック量（>0.5）+ Klankの長いdecayと
+  組み合わせると起動直後に発散しやすい。必ずLimiterで保護するか、
+  AllpassCで代替する。
+
+---
+
+### 問題X: MaToMa起動時に他アプリ（Spotify, Music.app等）の音が止まる【根本原因特定・完全修正済み】
 
 **症状:** `./start.sh` を実行すると、他の音楽アプリの音が止まり、再生しても音が出なくなる
-**根本原因（2軸）:**
+**根本原因（3軸すべて修正済み）:**
 
 **原因A: サンプルレート強制 (最重要)**
   - 旧コード `s.options.sampleRate = 44100;` がZoom/外部IFの影響で48kHzになったシステムに対し
     44100Hzを強制 → CoreAudioがデバイスをリセット → 全アプリの音声ストリーム中断
+  - **修正（2026-03-29）:** 削除。scsynth はシステムネイティブレートを使用
 
 **原因B: inputStreamsEnabled="0" の誤解釈**
   - 旧コード `s.options.inputStreamsEnabled = "0"` は「ストリーム0のみ無効、それ以外は有効」の意味
-  - つまり入力の完全無効化にはなっていなかった（意図した効果を発揮していなかった）
+  - **修正（2026-03-29）:** 削除（`numInputBusChannels = 0` のみで十分）
 
-**修正内容（2026-03-29）:**
-  - `s.options.sampleRate = 44100` → 削除（nil=ハードウェアネイティブレートを使用）
-  - `s.options.inputStreamsEnabled = "0"` → 削除（`numInputBusChannels = 0` のみで十分）
-  - 起動ログに実際のサンプルレートを表示するように追加
+**原因C: Python の set_system_audio_output_device() 呼び出し（最終原因）**
+  - bridge.py の `start_sc()` と GUI デバイス選択時に CoreAudio API
+    `AudioObjectSetPropertyData(kAudioHardwarePropertyDefaultOutputDevice)` を呼んでいた
+  - macOS がシステムデフォルト出力デバイスの変更を全アプリに通知
+    → Spotify/Music.app 等の音声ストリームが一斉にリセット
+  - **修正（2026-03-30）:**
+    - Python 側の `set_system_audio_output_device()` 呼び出しを完全に削除
+    - SC 側で `s.options.outDevice = "<デバイス名>"` を使用（他アプリに影響しない API）
+    - run_headless.scd 起動時に audio_device.txt を読んで `s.options.outDevice` に設定
 
-**確認方法:** `./start.sh` 後のログに `実際のサンプルレート: XXXXX Hz` が表示される。
-この値がシステムのサンプルレートと一致していれば正常（Audio MIDI設定.app で確認可）
+**確認方法:**
+  1. Spotify で音楽を再生したまま `./start.sh` を実行する
+  2. Spotify の再生が継続されれば修正成功
+  3. `./start.sh` 後のログに `出力デバイス: 'XXX' (audio_device.txt より設定)` が出れば正常
 
 ---
 

@@ -32,9 +32,13 @@ def load_scenes() -> list[dict]:
 
 
 def get_scene(name: str) -> dict | None:
-    """名前でシーンを取得する。見つからなければNoneを返す。"""
+    """英語id または日本語nameでシーンを取得する。見つからなければNoneを返す。
+
+    フロントエンドは英語id（例: "void", "warm"）を送信するため、
+    まずidでルックアップし、次にnameで検索する。
+    """
     for scene in load_scenes():
-        if scene["name"] == name:
+        if scene.get("id") == name or scene["name"] == name:
             return scene
     return None
 
@@ -78,6 +82,15 @@ def scene_to_osc_messages(scene: dict) -> list[dict]:
                 "address": "/matoma/granular/param",
                 "args": [sc_key, float(granular[scene_key])],
             })
+
+    # Organic Coupling: シーン切り替え時にドローン↔グラニュラーの連動強度を設定する
+    # 0.0 = 完全独立（深淵シーン） / 1.0 = 完全オーガニック（崩壊シーン）
+    # SC側の /matoma/coupling OSCdef が ~couplingBus を更新する
+    if "organic_coupling" in scene:
+        messages.append({
+            "address": "/matoma/coupling",
+            "args": [float(scene["organic_coupling"])],
+        })
 
     # Rhythmic の引力点を送信する
     rhythmic = scene.get("rhythmic", {})

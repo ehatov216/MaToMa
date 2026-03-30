@@ -403,10 +403,8 @@ _LayerParams = dict[str, tuple[float, float, float, float]]
 _DEFAULT_CHAOS_PARAMS: dict[str, _LayerParams] = {
     "drone": {
         # (init, attractor, range, speed)
-        # speed × range = 1ステップあたりの最大変化量（0.1秒ごと）
-        # freq: 速度0.15 × range20 = 3Hz/step → 数秒で±20Hzドリフト
-        "freq":         (60.0,  60.0,  20.0,  0.15),
-        # feedback: 速度0.12 → 約1秒で全rangを横断できる
+        # freq はシーン切り替えと TURING が担当 → ChaosEngine から除外
+        # feedback: 速度0.12 → 約1秒で全rangeを横断できる
         "feedback_amt": (0.25,  0.25,  0.15,  0.12),
         # shimmer: 浮遊感が数秒単位でゆっくり変化する
         "shimmer":      (0.4,   0.4,   0.3,   0.10),
@@ -612,7 +610,8 @@ class ChaosEngine:
 
         # Bounded Random Walk: 引力点方向への引力 + ランダム摂動
         # 引力: 現在値が引力点から離れるほど引き寄せる力が強くなる
-        attraction = (p.attractor - p.value) * 0.05
+        # 0.1 に引き上げることで確率的ランダムウォークから真の引力中心への収束へ
+        attraction = (p.attractor - p.value) * 0.1
         perturbation = (  # noqa: S311
             p.range * p.speed * (random.random() * 2.0 - 1.0)
         )

@@ -1,0 +1,41 @@
+{
+  "date": "2026-03-30",
+  "session": "GUI修正後フィードバック",
+  "entries": [
+    {
+      "target": "drone_feedback",
+      "rating": "良い",
+      "comment": "ピーキーだが音の特徴があって良かった"
+    },
+    {
+      "target": "drone_others",
+      "rating": "改善必要",
+      "comment": "FM/NOISE/WAVE/SINESはドローン切り替えで音の変化が感じにくい"
+    },
+    {
+      "target": "turing",
+      "rating": "機能不明",
+      "comment": "何ができるか分からない・音に変化がなかった"
+    },
+    {
+      "target": "scene",
+      "rating": "変化なし",
+      "comment": "シーン切り替えで音に変化が感じられなかった"
+    },
+    {
+      "target": "drop",
+      "rating": "変化なし",
+      "comment": "DROPで音に変化がなかった"
+    },
+    {
+      "target": "flute",
+      "rating": "UI不明瞭",
+      "comment": "どう操作したらいいか分からなかった"
+    },
+    {
+      "target": "percussion",
+      "rating": "改善必要",
+      "comment": "名前を『リズム』に変更。音もAlva Noto・池田良二的な電子音・合成音にしたい。いわゆるドラムではなく音波・電子的なリズム音。機能が効いていない場合は改善が必要"
+    }
+  ]
+}

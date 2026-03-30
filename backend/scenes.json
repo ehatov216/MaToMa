@@ -1,7 +1,9 @@
 [
   {
     "name": "深淵",
+    "id": "void",
     "comment": "Space層が支配。低域・chaos低。Aoyama的な静寂",
+    "organic_coupling": 0.0,
     "layers": {
       "granular": false,
       "spectral": false,
@@ -21,7 +23,9 @@
       "density_attractor": 5,
       "density_range": 8,
       "spray_attractor": 0.3,
+      "spray_range": 0.2,
       "room_attractor": 0.7,
+      "room_range": 0.2,
       "chaos_width": 0.5
     },
     "rhythmic": {
@@ -31,7 +35,9 @@
   },
   {
     "name": "浮遊",
+    "id": "warm",
     "comment": "標準。Aoyama的な粒子の場",
+    "organic_coupling": 0.35,
     "layers": {
       "granular": true,
       "spectral": false,
@@ -51,7 +57,9 @@
       "density_attractor": 12,
       "density_range": 15,
       "spray_attractor": 0.5,
+      "spray_range": 0.3,
       "room_attractor": 0.6,
+      "room_range": 0.25,
       "chaos_width": 0.3
     },
     "rhythmic": {
@@ -61,7 +69,9 @@
   },
   {
     "name": "緊張",
+    "id": "vast",
     "comment": "Event層が前に出る。Autechre的なカオス増大",
+    "organic_coupling": 0.7,
     "layers": {
       "granular": true,
       "spectral": true,
@@ -81,7 +91,9 @@
       "density_attractor": 25,
       "density_range": 20,
       "spray_attractor": 0.7,
+      "spray_range": 0.35,
       "room_attractor": 0.5,
+      "room_range": 0.2,
       "chaos_width": 0.55
     },
     "rhythmic": {
@@ -99,7 +111,9 @@
   },
   {
     "name": "崩壊",
+    "id": "lost",
     "comment": "最大chaos。Hecker的密度とAutechre的崩壊",
+    "organic_coupling": 0.9,
     "layers": {
       "granular": true,
       "spectral": true,
@@ -119,7 +133,9 @@
       "density_attractor": 40,
       "density_range": 25,
       "spray_attractor": 0.9,
+      "spray_range": 0.15,
       "room_attractor": 0.4,
+      "room_range": 0.15,
       "chaos_width": 0.75
     },
     "rhythmic": {

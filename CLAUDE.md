@@ -67,6 +67,7 @@ SuperCollider を操作する。
    | サブトラクティブ・フィルター・クラシックシンセ | `synthesis_subtractive_stereo.md` |
    | 加算合成・倍音積み上げ | `synthesis_additive.md` |
    | ウェーブテーブル | `synthesis_wavetable.md` |
+   | ウェーブシェーピング・非線形変換・Chebyshev・歪み・PAF | `synthesis_waveshaping.md` |
    | 物理モデリング・弦・管 | `synthesis_physical_modeling.md` |
    | パーカッション・打楽器 | `synthesis_percussion.md` |
    | カオス・非線形・Fb1・DXクロスフェード・ウェーブフォールド | `plugins_sc_quarks.md` |
@@ -81,14 +82,21 @@ SuperCollider を操作する。
    | Norns SCパターン・ParGroup・SelectX・KS弦・SpecCentroid | `norns_sc_patterns.md` |
    | UGenカタログ・発振器・フィルター・FFT・パンニング一覧 | `sc_ugen_catalog.md` |
    | Pbind/Pdef/Ndef・パターンクラス・スケール・ProxySpace | `sc_pattern_system.md` |
-   | ユークリッドリズム・Pwrand・normalizeSum・レイヤリング | `sc_livecoding_techniques.md` |
+   | ユークリッドリズム・Pwrand・レイヤリング・co34pt・ライブコーディング技法 | `sc_livecoding_techniques.md` |
    | Autechre美学・Dry/Wet判断・FM哲学・ストカスティック設計 | `artist_autechre_aesthetics.md` |
-   | Autechre制作技法・FM実装・FDN・ユークリッドリズム・機材詳細 | `artist_autechre_production.md` |
+   | Autechre制作技法・FM実装・FDN・ユークリッドリズム・機材詳細・FactMag | `artist_autechre_production.md` |
    | Burial美学・非グリッドリズム・Foley・ハウントロジー・Wet霧 | `artist_burial_aesthetics.md` |
-   | Alva Noto美学・還元主義・120bpmグリッド・グリッチ・沈黙設計 | `artist_alvanoto_aesthetics.md` |
+   | Alva Noto美学・還元主義・120bpmグリッド・グリッチ・沈黙設計・Carsten Nicolai | `artist_alvanoto_aesthetics.md` |
    | Tim Hecker美学・制御された崩壊・グラニュラー・スペクトル処理・リアンプ | `artist_timhecker_aesthetics.md` |
    | GitHubドローン事例・Pseed・フィードバックループ・多声ノイズ | `github_drone_generators.md` |
    | GitHubグラニュラー事例・GrainBuf・Warp1・スキャッター設計 | `github_granular_synthesizers.md` |
+   | ジェネラティブ音楽理論・Brian Eno・TOPLAP・アルゴリズム作曲 | `generative_music_theory.md` |
+   | 音声解析・ML・スペクトル特徴量・FluCoMa・KDTree・NMF・コーパス探索 | `plugins_flucoma.md` |
+   | バス設計・ノード順序・実行順序・エフェクトチェーン・Group・LocalIn | `sc_signal_routing.md` |
+   | Lag・LagUD・XFade2・DynKlank・リアルタイムパラメーター変更・グリッチ防止 | `sc_realtime_control.md` |
+   | リバーブ設計・FDN・GVerb・JPverb・残響・空間設計 | `sc_reverb_design.md` |
+   | 励振源・エキサイター・ノイズ種別・インパルス・物理モデリング音色設計 | `sc_exciter_types.md` |
+   | sc3-plugins依存UGen・DFM1・JPverb・MoogFF・ビルトインUGen確認 | `sc_sc3plugins_guide.md` |
 
 3. **ユーザーの日本語フィードバックを英語のSCテクニックに変換してから実装する**
    - 変換表は `feedback/knowledge.md` の「言葉とパラメーターの対応」を参照
