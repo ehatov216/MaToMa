@@ -18,6 +18,12 @@ venv/
 # ChromaDB (再生成可能なベクトルDB)
 knowledge/rag/chroma_db/
 
+# RAG ソース（ローカルDBとして管理、リモート不要）
+knowledge/rag/sources/
+
+# Claude プロジェクト設定（ローカル環境依存）
+CLAUDE.md
+
 # PID ファイル（実行時に生成）
 backend/.bridge.pid
 
