@@ -734,6 +734,83 @@ s.waitForBoot({
     s.sync;
     "エフェクト定義完了: \\matoma_feedback_loop".postln;
 
+    // Glitch
+    // 「エラーを音楽的素材として使う」ポスト・デジタル美学（Kim Cascone）。
+    // Gendy確率合成・CoinGateスタッター・ビットクラッシュ・FFTスペクトル破壊の4モード。
+    // mode 0: Latch + CoinGate スタッター（Alva Noto 的クリック + Ringz 金属共鳴）
+    // mode 1: Gendy 確率合成 ミックス（池田良二的カオスノイズ）
+    // mode 2: ビットクラッシュ + ダウンサンプリング（デジタル劣化）
+    // mode 3: FFT スペクトルグリッチ（PV_RandComb + PV_BinScramble）
+    SynthDef(\matoma_glitch, {
+        arg inBus,
+            out       = 0,
+            density   = 0.3,   // グリッチ頻度（CoinGateの確率: 0.0〜1.0）
+            intensity = 0.5,   // グリッチ強度（0.0〜1.0）
+            mode      = 0,     // グリッチタイプ（0〜3の連続値）
+            mix       = 0.5;   // ドライ/ウェット比（0.0〜1.0）
+
+        var sig, mono;
+        var m0, m1, m2, m3;
+        var glitched;
+
+        sig  = In.ar(inBus, 2);
+        mono = (sig[0] + sig[1]) * 0.5;
+
+        // mode 0: Latch + CoinGate スタッター（Alva Noto 的クリック）
+        {
+            var coinRate = density.linexp(0.0, 1.0, 2.0, 500.0);
+            var gateTrig = CoinGate.ar(density, Impulse.ar(coinRate));
+            var latchSig = Latch.ar(mono, gateTrig);
+            var ring = Ringz.ar(gateTrig,
+                Demand.ar(gateTrig, 0, Dwhite(500, 8000, inf)),
+                0.01) * intensity * 0.3;
+            m0 = latchSig + ring;
+        }.value;
+
+        // mode 1: Gendy 確率合成 ミックス（カオス的ノイズ）
+        {
+            var gendySig = Gendy1.ar(
+                ampdist:  intensity.linlin(0.0, 1.0, 0, 5).round,
+                durdist:  intensity.linlin(0.0, 1.0, 0, 1).round,
+                adparam:  intensity,
+                ddparam:  intensity,
+                minfreq:  20,
+                maxfreq:  intensity.linexp(0.0, 1.0, 200.0, 8000.0),
+                ampscale: intensity * 0.5,
+                initCPs:  intensity.linlin(0.0, 1.0, 12.0, 1.0).round.max(1),
+                knum:     intensity.linlin(0.0, 1.0, 12.0, 1.0).round.max(1)
+            ) * 0.5;
+            m1 = (mono * (1.0 - intensity * 0.7)) + (gendySig * intensity * 0.5);
+        }.value;
+
+        // mode 2: ビットクラッシュ + ダウンサンプリング（デジタル劣化）
+        {
+            var bits         = intensity.linlin(0.0, 1.0, 16.0, 1.0);
+            var quantized    = mono.round(2 ** (1 - bits));
+            var resampleRate = density.linexp(0.0, 1.0, 200.0, 44100.0);
+            m2 = Latch.ar(quantized, Impulse.ar(resampleRate));
+        }.value;
+
+        // mode 3: FFT スペクトルグリッチ（PV_RandComb + PV_BinScramble）
+        {
+            var chain = FFT(LocalBuf(2048), mono);
+            chain = PV_RandComb(chain, intensity * 0.9,
+                Impulse.kr(density * 10));
+            chain = PV_BinScramble(chain, intensity * 0.5, density * 0.3,
+                Impulse.kr(density * 5));
+            m3 = IFFT(chain);
+        }.value;
+
+        // SelectX.ar: 4モードをクロスフェードで連続切り替え
+        glitched = SelectX.ar(mode.clip(0.0, 3.0), [m0, m1, m2, m3]);
+        glitched = Limiter.ar(glitched * (1.0 + intensity), 0.95, 0.01);
+        glitched = LeakDC.ar(glitched);
+        Out.ar(out, XFade2.ar(mono, glitched, mix * 2 - 1) ! 2);
+    }).add;
+
+    s.sync;
+    "エフェクト定義完了: \\matoma_glitch".postln;
+
     // Effect パススルー（~effectBus → ハード出力）
     // エフェクトが何も起動していなくても ~effectBus の音が聞こえるようにする
     // 最終防衛線: LeakDC で DC 除去 → Limiter で音量を 0.9 以下に制限
@@ -753,6 +830,7 @@ s.waitForBoot({
     ~currentSpectralFrz = nil;
     ~currentWavefolder  = nil;
     ~currentFeedback    = nil;
+    ~currentGlitch      = nil;
 
     // パススルーを起動（常駐・必須）
     // ~effectGroup を作成し、その中の末尾に EffectOut を配置する。
@@ -866,6 +944,37 @@ s.waitForBoot({
         var param = msg[1].asSymbol; var value = msg[2].asFloat;
         { if (~currentFeedback.notNil) { ~currentFeedback.set(param, value); }; }.defer;
     }, '/matoma/effect/feedback/param', nil, 57200);
+
+    // Effect OSCdef: Glitch
+    OSCdef(\matoma_glitch_start, { |msg|
+        {
+            if (~currentGlitch.notNil) { ~currentGlitch.free; };
+            ~currentGlitch = Synth(\matoma_glitch,
+                [\inBus, ~effectBus, \out, 0],
+                target: ~currentEffectOut, addAction: \addBefore);
+            "グリッチ開始".postln;
+        }.defer;
+    }, '/matoma/effect/glitch/start', nil, 57200);
+
+    OSCdef(\matoma_glitch_stop, { |msg|
+        {
+            if (~currentGlitch.notNil) { ~currentGlitch.free; ~currentGlitch = nil; };
+            "グリッチ停止".postln;
+        }.defer;
+    }, '/matoma/effect/glitch/stop', nil, 57200);
+
+    OSCdef(\matoma_glitch_param, { |msg|
+        var param   = msg[1].asSymbol;
+        var value   = msg[2].asFloat;
+        var allowed = #[\intensity, \density, \mode, \mix];
+        {
+            if (allowed.includes(param).not) {
+                "グリッチ param: 許可されていないパラメーター '%' を無視".format(param).postln;
+            } {
+                if (~currentGlitch.notNil) { ~currentGlitch.set(param, value); };
+            };
+        }.defer;
+    }, '/matoma/effect/glitch/param', nil, 57200);
 
     // ══════════════════════════════════════════════════════════════
     // ■ STEP 7: RHYTHMIC — Turing Machine + 5音源
@@ -1134,6 +1243,71 @@ s.waitForBoot({
     "ドローンジェネレーター (5種) ロード完了".postln;
 
     // ══════════════════════════════════════════════════════════════
+    // ■ STEP 8c: GLITCH SYNTHS — 3種類のグリッチシンセ（独立音源）
+    // ══════════════════════════════════════════════════════════════
+    load(~matomaScDir +/+ "glitch.scd");
+    s.sync;
+    "グリッチシンセ (3種) ロード完了".postln;
+
+    ~currentGlitchGendy = nil;
+    ~currentGlitchChaos = nil;
+    ~currentGlitchBurst = nil;
+
+    OSCdef(\matoma_glitch_gendy_start, { |msg|
+        { if (~currentGlitchGendy.notNil) { ~currentGlitchGendy.free };
+          ~currentGlitchGendy = Synth(\matoma_glitch_gendy, addAction: \addToTail);
+          "グリッチ(GENDY)開始".postln; }.defer;
+    }, '/matoma/glitch/gendy/start', nil, 57200);
+
+    OSCdef(\matoma_glitch_gendy_stop, { |msg|
+        { ~currentGlitchGendy !? { ~currentGlitchGendy.free; ~currentGlitchGendy = nil };
+          "グリッチ(GENDY)停止".postln; }.defer;
+    }, '/matoma/glitch/gendy/stop', nil, 57200);
+
+    OSCdef(\matoma_glitch_gendy_param, { |msg|
+        var param = msg[1].asSymbol; var value = msg[2].asFloat;
+        var allowed = #[\chaos, \pitch, \density, \amp];
+        { if (allowed.includes(param) && ~currentGlitchGendy.notNil) {
+            ~currentGlitchGendy.set(param, value); }; }.defer;
+    }, '/matoma/glitch/gendy/param', nil, 57200);
+
+    OSCdef(\matoma_glitch_chaos_start, { |msg|
+        { if (~currentGlitchChaos.notNil) { ~currentGlitchChaos.free };
+          ~currentGlitchChaos = Synth(\matoma_glitch_chaos, addAction: \addToTail);
+          "グリッチ(CHAOS)開始".postln; }.defer;
+    }, '/matoma/glitch/chaos/start', nil, 57200);
+
+    OSCdef(\matoma_glitch_chaos_stop, { |msg|
+        { ~currentGlitchChaos !? { ~currentGlitchChaos.free; ~currentGlitchChaos = nil };
+          "グリッチ(CHAOS)停止".postln; }.defer;
+    }, '/matoma/glitch/chaos/stop', nil, 57200);
+
+    OSCdef(\matoma_glitch_chaos_param, { |msg|
+        var param = msg[1].asSymbol; var value = msg[2].asFloat;
+        var allowed = #[\rate, \fmDepth, \amp];
+        { if (allowed.includes(param) && ~currentGlitchChaos.notNil) {
+            ~currentGlitchChaos.set(param, value); }; }.defer;
+    }, '/matoma/glitch/chaos/param', nil, 57200);
+
+    OSCdef(\matoma_glitch_burst_start, { |msg|
+        { if (~currentGlitchBurst.notNil) { ~currentGlitchBurst.free };
+          ~currentGlitchBurst = Synth(\matoma_glitch_burst, addAction: \addToTail);
+          "グリッチ(BURST)開始".postln; }.defer;
+    }, '/matoma/glitch/burst/start', nil, 57200);
+
+    OSCdef(\matoma_glitch_burst_stop, { |msg|
+        { ~currentGlitchBurst !? { ~currentGlitchBurst.free; ~currentGlitchBurst = nil };
+          "グリッチ(BURST)停止".postln; }.defer;
+    }, '/matoma/glitch/burst/stop', nil, 57200);
+
+    OSCdef(\matoma_glitch_burst_param, { |msg|
+        var param = msg[1].asSymbol; var value = msg[2].asFloat;
+        var allowed = #[\density, \freq, \decay, \amp];
+        { if (allowed.includes(param) && ~currentGlitchBurst.notNil) {
+            ~currentGlitchBurst.set(param, value); }; }.defer;
+    }, '/matoma/glitch/burst/param', nil, 57200);
+
+    // ══════════════════════════════════════════════════════════════
     // ■ STEP 9: 常駐シンセ・自動スタート
     //
     //   【起動順序】
@@ -1203,6 +1377,9 @@ s.waitForBoot({
             s.freeAll;
             ~currentDrone = nil;
             ~currentGranular = nil;
+            ~currentGlitchGendy = nil;
+            ~currentGlitchChaos = nil;
+            ~currentGlitchBurst = nil;
             ~turingRoutine !? { ~turingRoutine.stop; ~turingRoutine = nil; };
             ~percRoutine   !? { ~percRoutine.stop;  ~percRoutine  = nil; };
             "【全停止】全シンセを解放しました。".postln;
@@ -1249,10 +1426,14 @@ s.waitForBoot({
     "  Drone v3 FB     : /matoma/drone/start|stop|param".postln;
     "  Granular        : /matoma/granular/start|stop|param".postln;
     "  Turing Machine  : /matoma/rhythmic/start|stop|trigger|param".postln;
-    "  Effects         : /matoma/effect/[delay|spectral|wavefolder|feedback]/start|stop|param".postln;
+    "  Effects         : /matoma/effect/[delay|spectral|wavefolder|feedback|glitch]/start|stop|param".postln;
     "  Percussion      : /matoma/perc/start|stop|step|bpm|filter|amp|clear".postln;
     "  Drone Gen (5種) : /matoma/drone/[fm|noise|wavetable|feedback|sines]/start|stop|param".postln;
     "                    /matoma/drone/all/stop".postln;
+    "  Glitch Synths  : /matoma/glitch/[gendy|chaos|burst]/start|stop|param".postln;
+    "    gendy param  : chaos, pitch, density, amp".postln;
+    "    chaos param  : rate, fmDepth, layers, filter, bits, amp".postln;
+    "    burst param  : density, freq, decay, harmonics, spread, pattern, amp".postln;
     "".postln;
     "  自動起動済み:".postln;
     "    - Effect パススルー (~effectBus → Out 0)".postln;

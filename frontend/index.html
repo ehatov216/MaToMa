@@ -11,6 +11,7 @@
   --c-scene:#4ade80;--c-drone:#60a5fa;--c-gran:#fb923c;
   --c-rhythmic:#f43f5e;--c-auto:#a78bfa;--c-warn:#fbbf24;
   --c-drop:#f472b6;--c-energy:#fbbf24;--c-turing:#818cf8;
+  --c-glitch:#ff4466;
 }
 body{background:var(--bg);color:var(--text);
   font-family:'SF Mono','Fira Code',monospace;font-size:12px;min-height:100vh}
@@ -155,6 +156,13 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
 .fx-togbtn:hover{background:var(--bg3);color:var(--text)}
 .fx-togbtn.on{border-color:var(--c-gran);color:var(--c-gran);background:#100e06}
 
+
+/* ── GLITCH SYNTH ── */
+.glitch-src-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-bottom: 6px; }
+.glitch-src-btn { background: #1a1a1a; border: 1px solid #333; color: #aaa; padding: 5px 2px; font-size: 11px; cursor: pointer; border-radius: 3px; text-align: center; }
+.glitch-src-btn:hover { border-color: var(--c-glitch); }
+.glitch-src-btn.on { background: var(--c-glitch); color: #000; border-color: var(--c-glitch); }
+
 /* ── PERC STEP EDITOR ── */
 #perc-panel .mbody{padding:.4rem .45rem}
 .perc-bpm-row{display:grid;grid-template-columns:54px 1fr 36px;
@@ -298,6 +306,79 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
         <div style="margin-top:.3rem">
           <button class="genbtn stop-all" style="width:100%;padding:.35rem"
             onclick="droneAllStop()">■ ALL STOP</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- GLITCH SYNTH -->
+    <div class="mod">
+      <div class="mhdr">
+        <div class="mbar" style="background:var(--c-glitch)"></div>
+        <div class="mname" style="color:var(--c-glitch)">GLITCH SYNTH</div>
+      </div>
+      <div class="mbody">
+        <div class="msub">SOURCE</div>
+        <div class="glitch-src-btns">
+          <button class="glitch-src-btn" id="btn-glitch-gendy" onclick="glitchSynthToggle('gendy')">GENDY</button>
+          <button class="glitch-src-btn" id="btn-glitch-chaos" onclick="glitchSynthToggle('chaos')">CHAOS</button>
+          <button class="glitch-src-btn" id="btn-glitch-burst" onclick="glitchSynthToggle('burst')">BURST</button>
+        </div>
+
+        <!-- GENDY パラメーター -->
+        <div class="msub">GENDY</div>
+        <div class="sr" style="--thumb:var(--c-glitch)">
+          <div class="sl"><b>CHAOS</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.50" id="s-gch"
+            oninput="glitchSynthParam('gendy','chaos',+this.value,'v-gch')">
+          <div class="sv" id="v-gch">0.50</div>
+        </div>
+        <div class="sr" style="--thumb:var(--c-glitch)">
+          <div class="sl"><b>PITCH</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.50" id="s-gpt"
+            oninput="glitchSynthParam('gendy','pitch',+this.value,'v-gpt')">
+          <div class="sv" id="v-gpt">0.50</div>
+        </div>
+        <div class="sr" style="--thumb:var(--c-glitch)">
+          <div class="sl"><b>DENSITY</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.50" id="s-gdn"
+            oninput="glitchSynthParam('gendy','density',+this.value,'v-gdn')">
+          <div class="sv" id="v-gdn">0.50</div>
+        </div>
+
+        <!-- CHAOS パラメーター -->
+        <div class="msub" style="margin-top:6px">CHAOS</div>
+        <div class="sr" style="--thumb:var(--c-glitch)">
+          <div class="sl"><b>RATE</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.50" id="s-crt"
+            oninput="glitchSynthParam('chaos','rate',+this.value,'v-crt')">
+          <div class="sv" id="v-crt">0.50</div>
+        </div>
+        <div class="sr" style="--thumb:var(--c-glitch)">
+          <div class="sl"><b>FM DEPTH</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.50" id="s-cfm"
+            oninput="glitchSynthParam('chaos','fmDepth',+this.value,'v-cfm')">
+          <div class="sv" id="v-cfm">0.50</div>
+        </div>
+
+        <!-- BURST パラメーター -->
+        <div class="msub" style="margin-top:6px">BURST</div>
+        <div class="sr" style="--thumb:var(--c-glitch)">
+          <div class="sl"><b>DENSITY</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.30" id="s-bdn"
+            oninput="glitchSynthParam('burst','density',+this.value,'v-bdn')">
+          <div class="sv" id="v-bdn">0.30</div>
+        </div>
+        <div class="sr" style="--thumb:var(--c-glitch)">
+          <div class="sl"><b>FREQ</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.50" id="s-bfq"
+            oninput="glitchSynthParam('burst','freq',+this.value,'v-bfq')">
+          <div class="sv" id="v-bfq">0.50</div>
+        </div>
+        <div class="sr" style="--thumb:var(--c-glitch)">
+          <div class="sl"><b>DECAY</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.30" id="s-bdc"
+            oninput="glitchSynthParam('burst','decay',+this.value,'v-bdc')">
+          <div class="sv" id="v-bdc">0.30</div>
         </div>
       </div>
     </div>
@@ -457,6 +538,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
           </div>
         </div>
 
+
       </div>
     </div>
 
@@ -596,12 +678,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
 <script>
 const WS_URL = 'ws://localhost:8765';
 let ws, reconnectTimer = null, reconnectDelay = 1000;
-let currentScene    = null;
-let currentDrop     = null;
-let freezeOn        = false;
-let turingRunning   = false;
-let currentDroneGen = null;
-let percRunning     = false;
+let currentScene      = null;
+let currentDrop       = null;
+let freezeOn          = false;
+let turingRunning     = false;
+let currentDroneGen   = null;
+let percRunning       = false;
 
 // PERC ステップ状態: tracks[trackIdx][stepIdx] = 0|1
 const PERC_TRACKS = ['kick','snare','hihat','clap'];
@@ -901,6 +983,7 @@ function stopAll() {
   send({ address: '/matoma/all/stop', args: [] });
   // 全トグルボタンの状態をリセット（UIのみ、OSCはall/stopで一括送信済み）
   droneAllStop();
+  glitchAllStop();
   ['delay','feedback'].forEach(fx => {
     fxState[fx] = false;
     const btn = document.getElementById('fx-' + fx + '-toggle');
@@ -1163,6 +1246,42 @@ document.addEventListener('keydown', e => {
   if (e.key === 'd') selectDrop('drop');
   if (e.key === 'a') selectDrop('anti-drop');
 });
+
+// ── GLITCH SYNTH ──────────────────────────────────────
+const activeGlitchSynths = new Set();
+const GLITCH_SYNTHS = ['gendy', 'chaos', 'burst'];
+
+function glitchSynthToggle(src) {
+  const btn = document.getElementById('btn-glitch-' + src);
+  if (activeGlitchSynths.has(src)) {
+    activeGlitchSynths.delete(src);
+    btn.classList.remove('on');
+    send({ address: '/matoma/glitch/' + src + '/stop', args: [] });
+    addLog('/glitch/' + src, 'stop');
+  } else {
+    activeGlitchSynths.add(src);
+    btn.classList.add('on');
+    send({ address: '/matoma/glitch/' + src + '/start', args: [] });
+    addLog('/glitch/' + src, 'start');
+  }
+}
+
+function glitchSynthParam(src, param, val, vid) {
+  document.getElementById(vid).textContent = val.toFixed(2);
+  send({ address: '/matoma/glitch/' + src + '/param', args: [param, val] });
+}
+
+function glitchAllStop() {
+  GLITCH_SYNTHS.forEach(src => {
+    if (activeGlitchSynths.has(src)) {
+      activeGlitchSynths.delete(src);
+      const btn = document.getElementById('btn-glitch-' + src);
+      if (btn) btn.classList.remove('on');
+      send({ address: '/matoma/glitch/' + src + '/stop', args: [] });
+    }
+  });
+  addLog('/glitch', 'all stop');
+}
 
 // ── INIT ──────────────────────────────────────────────────
 // KLANKドローンは起動時に自動スタートしているのでデフォルトON

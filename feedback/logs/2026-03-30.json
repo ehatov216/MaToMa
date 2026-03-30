@@ -39,3 +39,7 @@
     }
   ]
 }
+
+// 追記
+{"target": "glitch_chaos", "rating": "改善必要", "comment": "ワンパターン。パラメーターを増やして音色のバリエーションが欲しい"}
+{"target": "glitch_burst", "rating": "可能性あり", "comment": "良い方向。もっと変化を増やして欲しい"}
