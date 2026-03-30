@@ -1,4 +1,4 @@
-<!-- Generated: 2026-03-29 | Files scanned: sc/*.scd (9ファイル) | Token estimate: ~750 -->
+<!-- Generated: 2026-03-30 | Files scanned: sc/*.scd (9ファイル) | Token estimate: ~800 -->
 # SuperCollider Architecture
 
 ## ファイル構成
@@ -27,6 +27,38 @@ sc/
 6. 起動確認音: 880Hz ビープ音
 7. /matoma/ready を Python (port 9000) へ送信
 ```
+
+## 共有バス一覧
+
+```
+~droneBus    Bus.audio(s,2)   — Drone → Granular の素材ルート
+~effectBus   Bus.audio(s,2)   — 全音源 → グローバルエフェクト層ルート
+~centroidBus Bus.control(s,1) — [Organic Coupling] ドローン明るさ（0=暗〜1=明）
+~couplingBus Bus.control(s,1) — [Organic Coupling] 連動強度（0=独立〜1=完全連動）
+```
+
+## Organic Coupling アーキテクチャ (2026-03-30追加)
+
+```
+\matoma_analyser (SynthDef)
+  ← In.ar(~droneBus)
+  → 低域/高域エネルギー比 → Lag(2秒平滑化)
+  → Out.kr(~centroidBus)
+
+\matoma_granular (SynthDef)
+  ← In.kr(~centroidBus)  brightness
+  ← In.kr(~couplingBus)  coupling
+  → actual_density = density*(1-coupling) + organic_density*coupling
+  → Impulse.kr(actual_density) / Dust.kr(actual_density)
+```
+
+シーン別 coupling 値:
+- 深淵: 0.0（完全独立）
+- 浮遊: 0.35（軽い連動）
+- 緊張: 0.7（強い連動）
+- 崩壊: 0.9（ほぼオーガニック）
+
+OSC: `/matoma/coupling [0.0〜1.0]` → ~couplingBus 直接書き込み
 
 ## SynthDef: matoma_basic (synth.scd / FM合成)
 

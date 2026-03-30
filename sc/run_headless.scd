@@ -1215,17 +1215,28 @@ s.waitForBoot({
     }, '/matoma/rhythmic/load', nil, 57200);
 
     // ══════════════════════════════════════════════════════════════
-    // ■ STEP 8: PERCUSSION — 16ステップパーカッションシーケンサー
+    // ■ STEP 8: PERCUSSION — CHAOS ENGINE 専用パーカッション音源
     //
-    //   percussion.scd をロードして SynthDef と OSCdef を登録する。
-    //   4音源: metal(Klank) / fm(iScale) / noise(HPF) / spring(Spring+Ringz)
-    //   16ステップ × 4トラックの Routine ベースシーケンサー。
-    //   起動後はオフ状態（OSC /matoma/perc/start で手動スタート）。
+    //   percussion.scd: 4音源 SynthDef + CHAOS ENGINE のみ。
+    //   （ステップシーケンサーは将来のダンスミュージックプリセット用に温存）
+    //   起動後はオフ状態（OSC /matoma/perc/chaos/start で CHAOS ENGINE 開始）。
     // ══════════════════════════════════════════════════════════════
     "パーカッションロード先: %".format(~matomaScDir).postln;
     load(~matomaScDir +/+ "percussion.scd");
     s.sync;
-    "パーカッションシーケンサー ロード完了".postln;
+    "パーカッション音源 ロード完了".postln;
+
+    // ══════════════════════════════════════════════════════════════
+    // ■ STEP 8c: IKEDA ENGINE — 池田亮司的 test pattern エンジン
+    //
+    //   ikeda_engine.scd: ビット列×複数グリッド分割のミニマルパターン。
+    //   SynthDef(sub/click/sine/noise) + 32分/5連/7連符 Routine + OSCdef。
+    //   起動後はオフ状態（OSC /matoma/ikeda/start で開始）。
+    // ══════════════════════════════════════════════════════════════
+    "IKEDA ENGINEロード先: %".format(~matomaScDir).postln;
+    load(~matomaScDir +/+ "ikeda_engine.scd");
+    s.sync;
+    "IKEDA ENGINE ロード完了".postln;
 
     // ══════════════════════════════════════════════════════════════
     // ■ STEP 8b: DRONE GENERATORS — 5種類のドローンジェネレーター

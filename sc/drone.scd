@@ -54,12 +54,54 @@ s.waitForBoot({
             shimmer      = 0.4,
             room         = 0.7,
             amp          = 0.35,
-            gate         = 1;
+            gate         = 1,
+            // Layer A: 呼吸する有機体（外部からも上書き可能）
+            a1_depth     = 1.0,  // A1（呼吸）の深さ倍率 0.0〜1.0
+            a1_speed     = 0.02, // A1 呼吸速度 Hz（CHAOS が上げる）
+            a2_depth     = 1.0,  // A2（心拍）の深さ倍率
+            a3_depth     = 1.0,  // A3（神経）の深さ倍率
+            // TENSION 制御
+            cutoff       = 480;  // ローパスフィルター cutoff Hz（300〜4000）
 
         // SCルール: var宣言はすべて先頭にまとめる
         var noise, fb, klanked, saturated;
         var shifted, shimmered;
         var env, wetL, wetR, sig;
+        // Layer A: 3階層 LFNoise3
+        var a1_fb, a1_room;    // A1: 呼吸（0.01〜0.05 Hz）
+        var a2_detune;          // A2: 心拍（0.1〜0.5 Hz）
+        var a3_pan;             // A3: 神経（1〜5 Hz）
+        // Layer A 計算済みの有機値
+        var fb_live, room_live, freq_live;
+
+        // ── Layer A1: 呼吸（0.01〜0.05 Hz）──────────────────────────────
+        // 最も遅い揺らぎ。feedback と room を「肺の収縮・拡張」のように動かす。
+        // a1_depth で CHAOS スライダーが深さを制御する（0=無変調、1=最大揺らぎ）。
+        a1_fb   = LFNoise3.kr(a1_speed).range(
+            feedback_amt - (0.08 * a1_depth),
+            feedback_amt + (0.08 * a1_depth)
+        ).clip(0.0, 0.5);   // feedback_amt の安全上限を守る
+
+        a1_room = LFNoise3.kr(a1_speed * 0.75).range(
+            room - (0.12 * a1_depth),
+            room + (0.12 * a1_depth)
+        ).clip(0.0, 1.0);
+
+        // ── Layer A2: 心拍（0.1〜0.5 Hz）───────────────────────────────
+        // 中程度の揺らぎ。ピッチを微妙にビブラートさせる（±0.5 semitone 相当）。
+        a2_detune = LFNoise3.kr(0.2).range(
+            1.0 - (0.015 * a2_depth),
+            1.0 + (0.015 * a2_depth)
+        );
+
+        // ── Layer A3: 神経（1〜5 Hz）────────────────────────────────────
+        // 細かい揺らぎ。ステレオパンを微細に動かして「息するステレオ感」を作る。
+        a3_pan = LFNoise3.kr(2.5).range(-0.15 * a3_depth, 0.15 * a3_depth);
+
+        // Layer A 計算済みの有機値（以降はこれを Klank に渡す）
+        fb_live   = a1_fb;
+        room_live = a1_room;
+        freq_live = freq * a2_detune;
 
         // ── PinkNoise: 共鳴の「種」 ──────────────────────────────────────
         // PinkNoiseは自然界に近いスペクトル分布を持つ雑音。
@@ -76,26 +118,26 @@ s.waitForBoot({
         // 非整数倍音（2.756, 5.404 ...）を使うと「金属板」でなく「空気の塊」のような質感になる。
         // 参照: synthesis_physical_modeling.md / sa_modal_bar
         klanked = Klank.ar(`[
-            [freq,            freq * 1.501,  freq * 2.756,  freq * 3.999,  freq * 5.404],
+            [freq_live,            freq_live * 1.501,  freq_live * 2.756,  freq_live * 3.999,  freq_live * 5.404],
             [1.0,             0.7,           0.5,           0.3,           0.15],
             [4.0,             3.0,           2.0,           1.5,           1.0]
-        ], noise + (fb[0] * feedback_amt));
+        ], noise + (fb[0] * fb_live));
 
         // ステレオ感のため、わずかに異なる倍音比率でLチャンネルを追加生成
         klanked = [
             klanked,
             Klank.ar(`[
-                [freq * 1.002, freq * 1.503,  freq * 2.759,  freq * 4.003,  freq * 5.407],
+                [freq_live * 1.002, freq_live * 1.503,  freq_live * 2.759,  freq_live * 4.003,  freq_live * 5.407],
                 [0.9,          0.65,          0.45,          0.27,          0.13],
                 [4.1,          3.1,           2.1,           1.55,          1.05]
-            ], noise + (fb[1] * feedback_amt))
+            ], noise + (fb[1] * fb_live))
         ];
 
         // ── Limiter + AllpassC: クリッピング防止と空間拡散 ───────────────
         // AllpassC は位相をランダムに拡散させてリバーブ感を薄く付与する（前処理）。
         klanked = Limiter.ar(klanked, 0.65);
         klanked = AllpassC.ar(
-            LPF.ar(klanked, freq * 8.0),
+            LPF.ar(klanked, cutoff.max(freq * 2.0)),
             0.08,
             [LFNoise1.kr(0.11).range(0.03, 0.07),
              LFNoise1.kr(0.09).range(0.04, 0.08)],
@@ -114,8 +156,8 @@ s.waitForBoot({
         // 参照: synthesis_ambient_drone.md / sa_shimmer
         shifted  = PitchShift.ar(saturated, 0.1, 2.0, 0.01, 0.005);
         shimmered = [
-            saturated[0] + (shifted[0] * shimmer),
-            saturated[1] + (shifted[1] * shimmer)
+            saturated[0] + (shifted[0] * shimmer) + (a3_pan * 0.1),
+            saturated[1] + (shifted[1] * shimmer) - (a3_pan * 0.1)
         ];
 
         // ── エンベロープ ─────────────────────────────────────────────────
@@ -129,13 +171,12 @@ s.waitForBoot({
         Out.ar(~droneBus, shimmered);
 
         // ── FreeVerb2: 最終空間演出 ──────────────────────────────────────
-        // feedback/knowledge.md の「ドローン > 効いた操作」に基づき、
-        // 残響が必要なときは GVerb への切り替えも選択肢に残しておく。
+        // room_live (Layer A1) を使うことでリバーブ感が「呼吸」する
         sig = FreeVerb2.ar(
             shimmered[0], shimmered[1],
-            mix:  room.linlin(0.0, 1.0, 0.45, 0.92),
-            room: room.linlin(0.0, 1.0, 0.60, 0.95),
-            damp: room.linlin(0.0, 1.0, 0.55, 0.12)
+            mix:  room_live.linlin(0.0, 1.0, 0.45, 0.92),
+            room: room_live.linlin(0.0, 1.0, 0.60, 0.95),
+            damp: room_live.linlin(0.0, 1.0, 0.55, 0.12)
         );
 
         Out.ar(0, sig * amp);

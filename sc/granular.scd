@@ -86,10 +86,38 @@ s.waitForBoot({
             room      = 0.5,  // 個別リバーブのroom size
             amp       = 0.5,
             gate      = 1,
-            outBus    = 0;    // 出力先バス（0=ハード出力、~effectBus=エフェクト層）
+            outBus    = 0,    // 出力先バス（0=ハード出力、~effectBus=エフェクト層）
+            // Layer A: 外部から深さを制御できる
+            a2_depth  = 1.0,  // A2（心拍）の深さ倍率 0.0〜1.0
+            a3_depth  = 1.0;  // A3（神経）の深さ倍率
 
         var trig_regular, trig_random, trig, grainPos;
         var sig, wet, env;
+        // Layer A2: 心拍（0.1〜0.5 Hz）— density と room を揺らす
+        var a2_density_mod, a2_room_mod;
+        // Layer A3: 神経（1〜5 Hz）— 粒の位置をさらに微細に揺らす
+        var a3_jitter_mod;
+        // 有機値
+        var density_live, room_live;
+
+        // ── Layer A2: 心拍（0.15〜0.35 Hz）─────────────────────────────
+        // 粒の密度（density）とリバーブを「心拍」のように緩やかに揺らす。
+        a2_density_mod = LFNoise3.kr(0.25).range(
+            1.0 - (0.25 * a2_depth),
+            1.0 + (0.25 * a2_depth)
+        );
+        a2_room_mod = LFNoise3.kr(0.18).range(
+            room - (0.08 * a2_depth),
+            room + (0.08 * a2_depth)
+        ).clip(0.0, 1.0);
+
+        // ── Layer A3: 神経（2〜4 Hz）────────────────────────────────────
+        // 粒の jitter をさらに微細に揺らして「霧のミクロ揺らぎ」を作る。
+        a3_jitter_mod = jitter + LFNoise3.kr(3.0).range(0.0, 0.04 * a3_depth);
+
+        // Layer A 計算済みの有機値
+        density_live = density * a2_density_mod;
+        room_live    = a2_room_mod;
 
         // ── spray: 規則的（Impulse）↔ ランダム（Dust）をブレンド ──────
         // SelectX.kr は 0〜1 の間でクロスフェードする。
@@ -97,13 +125,13 @@ s.waitForBoot({
         // spray=0.5 → Impulse と Dust の中間（半有機的）
         // spray=1.0 → Dust のみ（完全ランダム・霧的）
         // 参照: norns_sc_patterns.md § 4. グレイン合成（Norns Siloパターン）
-        trig_regular = Impulse.kr(density);
-        trig_random  = Dust.kr(density);
+        trig_regular = Impulse.kr(density_live);
+        trig_random  = Dust.kr(density_live);
         trig = SelectX.kr(spray, [trig_regular, trig_random]);
 
-        // ── 再生位置 + Jitter ─────────────────────────────────────────
-        // pos を中心に LFNoise0 で揺らす（silo_grain の jitter 相当）
-        grainPos = pos + LFNoise0.kr(6).bipolar(jitter);
+        // ── 再生位置 + Jitter ──────────────────────────────────
+        // a3_jitter_mod (Layer A3 神経) を加えて「霧のミクロ揺らぎ」を生む
+        grainPos = pos + LFNoise0.kr(6).bipolar(a3_jitter_mod);
         grainPos = grainPos.clip(0.0, 1.0);
 
         // ── GrainBuf: リングバッファから粒を生成 ─────────────────────
@@ -122,20 +150,21 @@ s.waitForBoot({
         );
 
         // ── 個別 FreeVerb2 リバーブ ───────────────────────────────────
-        // Granular 層の中程度リバーブ：粒の形が残る程度（room は中間）
-        // system_design.md § 各層の個別Reverb：「中程度（粒の形が残る程度）」
+        // room_live (Layer A2 心拍) を使うことでリバーブ感が「呼吸」する
         wet = FreeVerb2.ar(
             sig[0], sig[1],
-            mix:  room.linlin(0.0, 1.0, 0.25, 0.75),
-            room: room.linlin(0.0, 1.0, 0.45, 0.85),
-            damp: room.linlin(0.0, 1.0, 0.6, 0.2)
+            mix:  room_live.linlin(0.0, 1.0, 0.25, 0.75),
+            room: room_live.linlin(0.0, 1.0, 0.45, 0.85),
+            damp: room_live.linlin(0.0, 1.0, 0.6, 0.2)
         );
 
         // ── エンベロープ ──────────────────────────────────────────────
         // 0.5秒でふわっと立ち上がり、stop時は2秒でフェードアウト
         env = EnvGen.ar(Env.adsr(0.5, 0.0, 1.0, 2.0), gate, doneAction: 2);
 
-        Out.ar(outBus, wet * env * amp);
+        // ── 安全制御: Limiter（多層防衛の最終ライン） ───────────────────
+        // 高密度グレインが重なるとピークが出やすいため 0.9 で頭打ちにする
+        Out.ar(outBus, Limiter.ar(wet * env * amp, 0.9));
     }).add;
 
     s.sync;
