@@ -37,9 +37,10 @@ def chaos_to_internal(chaos: float) -> list[tuple[str, list]]:
     spray    = c * 0.8           # 0.0〜0.8
 
     return [
-        ("/matoma/drone/param",    ["feedback_amt", feedback]),
-        ("/matoma/drone/param",    ["shimmer",       shimmer]),
-        ("/matoma/granular/param", ["spray",         spray]),
+        ("/matoma/drone/param",      ["feedback_amt", feedback]),
+        ("/matoma/drone/param",      ["shimmer",       shimmer]),
+        ("/matoma/granular/param",   ["spray",         spray]),
+        ("/matoma/gran_synth/param", ["chaos",         c]),
     ]
 
 
@@ -54,8 +55,11 @@ def density_to_internal(density: float) -> list[tuple[str, list]]:
     d = max(0.0, min(1.0, float(density)))
     grain_density = 10.0 + d * 190.0   # 10〜200 grains/sec
 
+    gran_synth_density = 10.0 + d * 50.0   # 10〜60 grains/sec
+
     return [
-        ("/matoma/granular/param", ["density", grain_density]),
+        ("/matoma/granular/param",   ["density", grain_density]),
+        ("/matoma/gran_synth/param", ["density", gran_synth_density]),
     ]
 
 

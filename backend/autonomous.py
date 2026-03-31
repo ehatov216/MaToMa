@@ -423,6 +423,12 @@ _DEFAULT_CHAOS_PARAMS: dict[str, _LayerParams] = {
         # prob: Turing Machine の変異量が1〜2分かけて緩やかに変化
         "prob": (0.3,  0.3,  0.3,  0.06),
     },
+    "gran_synth": {
+        # chaos: 有機モジュレーション深さ。ゆっくりと表情を変える
+        "chaos":   (0.3,  0.3,  0.4,  0.06),
+        # density: 粒の密度。SC側で5-60の範囲を受け付ける
+        "density": (35.0, 35.0, 20.0, 0.15),
+    },
 }
 
 

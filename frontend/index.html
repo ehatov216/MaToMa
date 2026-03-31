@@ -798,6 +798,30 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
           </div>
         </div>
 
+        <div class="msub" style="margin-top:.4rem">GRAN SYNTH</div>
+        <div class="chaos-row">
+          <div class="chaos-hd">
+            <span class="chaos-key">chaos</span>
+            <span class="chaos-val" id="cv-gsynth-chaos">—</span>
+          </div>
+          <div class="chaos-bar-wrap">
+            <div class="chaos-bar" id="cb-gsynth-chaos"
+              style="width:0%;background:var(--c-gran)"></div>
+            <div class="chaos-attractor" id="ca-gsynth-chaos" style="display:none"></div>
+          </div>
+        </div>
+        <div class="chaos-row">
+          <div class="chaos-hd">
+            <span class="chaos-key">density</span>
+            <span class="chaos-val" id="cv-gsynth-density">—</span>
+          </div>
+          <div class="chaos-bar-wrap">
+            <div class="chaos-bar" id="cb-gsynth-density"
+              style="width:0%;background:var(--c-gran)"></div>
+            <div class="chaos-attractor" id="ca-gsynth-density" style="display:none"></div>
+          </div>
+        </div>
+
         <div class="msub" style="margin-top:.4rem">TURING</div>
         <div class="chaos-row">
           <div class="chaos-hd">
@@ -845,6 +869,22 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
             min="60" max="200" value="120" step="1"
             oninput="percBpm(this.value)">
           <div class="sv" id="v-perc-bpm" style="color:var(--c-rhythmic)">120</div>
+        </div>
+
+        <!-- 確率コントロール -->
+        <div class="sr" style="--thumb:var(--c-rhythmic)">
+          <div class="sl"><b>TRIG</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.80"
+            id="s-seq-trig"
+            oninput="seqProb('trig_prob',+this.value,'v-seq-trig')">
+          <div class="sv" id="v-seq-trig">0.80</div>
+        </div>
+        <div class="sr" style="--thumb:var(--c-rhythmic)">
+          <div class="sl"><b>MUTATE</b></div>
+          <input type="range" min="0" max="0.3" step="0.005" value="0.05"
+            id="s-seq-mut"
+            oninput="seqProb('mutation',+this.value,'v-seq-mut')">
+          <div class="sv" id="v-seq-mut">0.05</div>
         </div>
 
         <!-- 4 tracks × 16 steps -->
@@ -1175,6 +1215,14 @@ function updateChaosState(params) {
     ];
     for (const r of rows) { if (r.src != null) { const u=_unpack(r.src); updateChaosBar(r.key,u.val,u.att,r.min,r.max,r.fmt); } }
   }
+  if (params.gran_synth) {
+    const gs = params.gran_synth;
+    const rows = [
+      { key:'gsynth-chaos',   src:gs.chaos,   min:0,  max:1,  fmt:v=>v.toFixed(2) },
+      { key:'gsynth-density', src:gs.density, min:5, max:60, fmt:v=>Math.round(v).toString() },
+    ];
+    for (const r of rows) { if (r.src != null) { const u=_unpack(r.src); updateChaosBar(r.key,u.val,u.att,r.min,r.max,r.fmt); } }
+  }
 }
 
 function updateChaosBar(key, value, attractor, min, max, fmt) {
@@ -1344,6 +1392,11 @@ function fxParam(fx, param, rawVal, vidId, fmt) {
 }
 
 // ── PERC ──────────────────────────────────────────────────
+function seqProb(sub, val, vid) {
+  document.getElementById(vid).textContent = val.toFixed(2);
+  send({ address: '/matoma/seq/' + sub, args: [val] });
+}
+
 function percToggle() {
   percRunning = !percRunning;
   const btn = document.getElementById('btn-perc-toggle');
