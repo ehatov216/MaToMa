@@ -502,14 +502,15 @@ s.waitForBoot({
     OSCdef(\matoma_granular_start, { |msg|
         {
             if (~currentGranular.notNil) { ~currentGranular.set(\gate, 0); };
+            // Out(0) 直接出力（effectBus経由だとノードの実行順序問題で無音）
             ~currentGranular = Synth(\matoma_granular, [
                 \buf,            ~granularRingBuf.bufnum,
-                \outBus,         ~effectBus.index,
+                \outBus,         0,
                 \centroidBusIdx, ~centroidBus.index,
                 \couplingBusIdx, ~couplingBus.index
             ], addAction: \addToTail);
-            "グラニュラー開始 (ringBuf: %, outBus: %, coupling: %)".format(
-                ~granularRingBuf.bufnum, ~effectBus.index,
+            "グラニュラー開始 (ringBuf: %, outBus: 0, coupling: %)".format(
+                ~granularRingBuf.bufnum,
                 ~couplingBus.getSynchronous.round(0.01)).postln;
         }.defer;
     }, '/matoma/granular/start', nil, 57200);
@@ -1141,9 +1142,10 @@ s.waitForBoot({
                 if (~turingRegister[0] == 1) {
                     var buf = if (synthSym == \matoma_rhythmic_grain) {
                         ~rhythmicBuf.bufnum } { 0 };
+                    // Out(0) 直接出力（effectBus経由だとノードの実行順序問題で無音）
                     Synth(synthSym, [
                         \freq, freq, \amp, ~turingAmp * rrand(0.5, 1.0),
-                        \buf, buf, \outBus, ~effectBus.index
+                        \buf, buf, \outBus, 0
                     ], addAction: \addToTail);
                 };
 
@@ -1169,7 +1171,7 @@ s.waitForBoot({
                 var buf = if (synthName == \matoma_rhythmic_grain) {
                     ~rhythmicBuf.bufnum } { 0 };
                 Synth(synthName, [\freq, freq, \amp, amp, \buf, buf,
-                    \outBus, ~effectBus.index], addAction: \addToTail);
+                    \outBus, 0], addAction: \addToTail);
                 "リズムトリガー: % freq:% amp:%".format(
                     synthName, freq.round(0.1), amp.round(0.01)).postln;
             };

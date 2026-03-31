@@ -183,9 +183,10 @@ OSCdef(\matoma_gran_sampler_start, { |msg|
             if (~currentGranSampler.notNil) {
                 ~currentGranSampler.set(\gate, 0);
             };
+            // Out(0) 直接出力（effectBus経由だとノードの実行順序問題で無音になる）
             ~currentGranSampler = Synth(\matoma_gran_sampler, [
                 \buf,    ~granSamplerBuf.bufnum,
-                \outBus, ~effectBus.index
+                \outBus, 0
             ], addAction: \addToTail);
             "グラニュラーサンプラー開始 (buf:% frames:% dur:%.2fs)".format(
                 ~granSamplerBuf.bufnum,

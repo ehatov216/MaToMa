@@ -162,8 +162,9 @@ OSCdef(\matoma_gran_synth_start, { |msg|
         if (~currentGranSynth.notNil) {
             ~currentGranSynth.set(\gate, 0);
         };
+        // Out(0) 直接出力（effectBus経由だとノードの実行順序問題で無音になる）
         ~currentGranSynth = Synth(\matoma_gran_synth, [
-            \outBus, ~effectBus.index
+            \outBus, 0
         ], addAction: \addToTail);
         "グラニュラーシンセ開始 (freq:110 density:35 grainDur:0.18)".postln;
     }.defer;
