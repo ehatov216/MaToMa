@@ -16,16 +16,19 @@
 ## WebSocket Routes (Browser → Python, port 8765)
 
 ```
-/matoma/scene           → scenes.py.get_scene() → OSC複数送信
-/matoma/param           → sc_client.send_message("/matoma/param", ...)
-/matoma/drone/param     → sc_client.send_message("/matoma/drone/param", ...)
-/matoma/granular/param  → sc_client.send_message("/matoma/granular/param", ...)
-/matoma/granular/load   → sc_client.send_message("/matoma/granular/load", ...)
-/matoma/granular/browse → _handle_granular_browse() → ファイル選択ダイアログ
-/matoma/spectral/param  → sc_client.send_message("/matoma/spectral/param", ...)
-/matoma/auto/*          → autonomous.py のメソッド呼び出し
-/matoma/seq/*           → sequencer.py のメソッド呼び出し
-/matoma/tidal/*         → _handle_tidal() → tidal_controller.py
+/matoma/scene            → scenes.py.get_scene() → OSC複数送信
+/matoma/param            → sc_client.send_message("/matoma/param", ...)
+/matoma/drone/param      → sc_client.send_message("/matoma/drone/param", ...)
+/matoma/granular/param   → sc_client.send_message("/matoma/granular/param", ...)
+/matoma/granular/load    → sc_client.send_message("/matoma/granular/load", ...)
+/matoma/granular/browse  → _handle_granular_browse() → ファイル選択ダイアログ
+/matoma/gran_synth/start → sc_client.send_message("/matoma/gran_synth/start", ...) NEW
+/matoma/gran_synth/stop  → sc_client.send_message("/matoma/gran_synth/stop", ...) NEW
+/matoma/gran_synth/param → sc_client.send_message("/matoma/gran_synth/param", ...) NEW
+/matoma/spectral/param   → sc_client.send_message("/matoma/spectral/param", ...)
+/matoma/auto/*           → autonomous.py のメソッド呼び出し
+/matoma/seq/*            → sequencer.py のメソッド呼び出し
+/matoma/tidal/*          → _handle_tidal() → tidal_controller.py
 ```
 
 ## Module Map

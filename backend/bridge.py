@@ -386,6 +386,46 @@ def _handle_osc_message(address: str, *args) -> None:
         )
         return
 
+    if address == "/matoma/gran_sampler/loaded":
+        path = str(args[0]) if args else ""
+        num_frames = int(args[1]) if len(args) > 1 else 0
+        sample_rate = float(args[2]) if len(args) > 2 else 44100.0
+        duration = (
+            round(num_frames / sample_rate, 2) if sample_rate > 0 else 0.0
+        )
+        log.info(f"グラニュラーサンプラーロード完了: {path} ({duration}s)")
+        asyncio.get_running_loop().create_task(
+            broadcast({
+                "type": "gran_sampler_loaded",
+                "path": path,
+                "num_frames": num_frames,
+                "sample_rate": sample_rate,
+                "duration": duration,
+            })
+        )
+        return
+
+    if address == "/matoma/gran_sampler/load_error":
+        path = str(args[0]) if args else ""
+        log.warning(f"グラニュラーサンプラーロードエラー: {path}")
+        asyncio.get_running_loop().create_task(
+            broadcast({
+                "type": "gran_sampler_load_error",
+                "message": f"ファイル読み込み失敗: {path}",
+            })
+        )
+        return
+
+    if address == "/matoma/gran_sampler/no_buffer":
+        log.warning("グラニュラーサンプラー: バッファ未ロード状態でSTARTが押されました")
+        asyncio.get_running_loop().create_task(
+            broadcast({
+                "type": "gran_sampler_load_error",
+                "message": "バッファ未ロード。先にファイルを選択してください",
+            })
+        )
+        return
+
     log.info(f"OSC受信: {address}  args={args}")
     asyncio.get_running_loop().create_task(
         broadcast({"address": address, "args": list(args)})
@@ -569,6 +609,9 @@ async def ws_handler(websocket) -> None:
 
                 elif address == "/matoma/granular/browse":
                     await _handle_granular_browse(websocket)
+
+                elif address == "/matoma/gran_sampler/browse":
+                    await _handle_gran_sampler_browse(websocket)
 
                 elif address.startswith("/matoma/seq/"):
                     await _handle_seq(address, args, websocket)
@@ -907,6 +950,57 @@ async def _handle_granular_browse(websocket) -> None:
         sc_client.send_message("/matoma/granular/load", [sc_load_path])
     except Exception as e:
         log.warning(f"ファイル選択ダイアログエラー: {e}")
+
+
+async def _handle_gran_sampler_browse(websocket) -> None:
+    """グラニュラーサンプラー用ファイル選択ダイアログ。
+    選択されたパスを SC の /matoma/gran_sampler/load へ送る。
+    """
+    script = (
+        'POSIX path of (choose file of type '
+        '{"wav", "aif", "aiff", "flac", "mp3"} '
+        'with prompt "グラニュラーサンプラー音源ファイルを選択してください")'
+    )
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            ),
+        )
+        path = result.stdout.strip()
+        if not path:
+            log.info("グラニュラーサンプラー: ファイル選択がキャンセルされました")
+            return
+
+        log.info(f"グラニュラーサンプラー音源選択: {path}")
+        await websocket.send(
+            json.dumps({"type": "gran_sampler_file_selected", "path": path})
+        )
+
+        sc_load_path = path
+        if path.lower().endswith(".mp3"):
+            log.info("MP3を検出 → ffmpegでWAVに変換中...")
+            converted = await _convert_mp3_to_wav(path)
+            if converted:
+                sc_load_path = converted
+                log.info(f"変換完了: {sc_load_path}")
+            else:
+                await broadcast({
+                    "type": "gran_sampler_load_error",
+                    "message": (
+                        "MP3変換失敗。"
+                        "ffmpegをインストールしてください（brew install ffmpeg）"
+                    ),
+                })
+                return
+
+        sc_client.send_message("/matoma/gran_sampler/load", [sc_load_path])
+    except Exception as e:
+        log.warning(f"グラニュラーサンプラー ファイル選択エラー: {e}")
 
 
 def _acquire_pid_lock() -> None:

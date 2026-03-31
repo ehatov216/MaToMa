@@ -1,13 +1,14 @@
-<!-- Generated: 2026-03-30 | Files scanned: sc/*.scd (9ファイル) | Token estimate: ~800 -->
+<!-- Generated: 2026-03-31 | Files scanned: sc/*.scd (10ファイル) | Token estimate: ~850 -->
 # SuperCollider Architecture
 
 ## ファイル構成
 
 ```
 sc/
-├── run_headless.scd  (1121行) — 起動スクリプト・全モジュールロード・OSCdef登録
+├── run_headless.scd  (1459行) — 起動スクリプト・全モジュールロード・OSCdef登録
 ├── drone.scd          (219行) — ドローン SynthDef v3 (自己組織化フィードバック)
-├── granular.scd       (241行) — グラニュラーサンプラー Ndef
+├── granular.scd       (241行) — グラニュラーサンプラー Ndef (バッファベース)
+├── gran_synth.scd     (203行) — グラニュラーシンセ SynthDef (バッファ不要・独立型) NEW
 ├── synth.scd           (97行) — FMシンセ SynthDef
 ├── ambient.scd        (135行) — アンビエントパッド Ndef
 ├── effects.scd        (366行) — スペクトル処理 + グローバルエフェクトチェーン
@@ -108,7 +109,7 @@ Signal Chain:
   Out
 ```
 
-## Ndef(\granular) (granular.scd)
+## Ndef(\granular) (granular.scd / バッファベース)
 
 ```
 GrainSin / TGrains を使用
@@ -118,6 +119,51 @@ Parameters:
   spread  0-1    ピッチばらつき
   amp     0-1
 フィードバック: /matoma/granular/density → Python → ブラウザ表示
+```
+
+## SynthDef: matoma_gran_synth (gran_synth.scd / バッファ不要・独立型) NEW
+
+```
+設計思想: GrainSin（バッファ不要）を高密度で発火させて
+         「途切れない・太い・滑らかな」アンビエントテクスチャ生成
+
+Parameters:
+  freq      = 110Hz    基本周波数
+  density   = 35       グレイン/秒（同時に ~6粒重なる）
+  grainDur  = 0.18s    グレイン長（滑らかさの鍵）
+  spread    = 0.2      ピッチ散乱（0=純粋、1=広い）
+  panSpread = 0.7      ステレオ広がり
+  bright    = 0.4      オクターブ上層の量（0=暗い、1=明るい）
+  chaos     = 0.3      有機モジュレーション深さ
+  room      = 0.6      リバーブ量
+  amp       = 0.4      音量
+
+Signal Chain:
+  GrainSin (基音層) + GrainSin (オクターブ上層 × bright)
+    ↓
+  FreeVerb2 (room パラメーターで空間化)
+    ↓
+  Env.adsr (attack:2s / release:5s で緩やか立ち上がり・消滅)
+    ↓
+  Limiter (0.85 で安全制御)
+    ↓
+  ~effectBus
+
+Layer A: 3階層有機モジュレーション（drone.scd と同設計）
+  A1（呼吸, ~0.04 Hz）: density を ±30% chaos で揺らす
+  A2（心拍, ~0.15 Hz）: pitch を spread×chaos で揺らす
+  A3（神経, ~3 Hz）  : pan をゆっくり動かす
+```
+
+## OSCdef: gran_synth (gran_synth.scd) NEW
+
+```
+/matoma/gran_synth/start      — SynthDef インスタンス起動 (既起動なら置換)
+/matoma/gran_synth/stop       — gate=0 → 5秒フェードアウト
+/matoma/gran_synth/param      — [key, val] パラメーター変更
+                                 許可リスト: freq, density, grainDur,
+                                            spread, panSpread, bright,
+                                            chaos, room, amp, gate
 ```
 
 ## Ndef(\ambient) (ambient.scd)
@@ -161,11 +207,14 @@ SynthDef:
 ## OSCdef 一覧 (Python → SC)
 
 ```
-\matoma_param       /matoma/param            [key, val] → currentSynth.set(key, val)
-\matoma_drone       /matoma/drone/param      [key, val] → SynthDef(\matoma_drone).set()
-\matoma_granular    /matoma/granular/param   [key, val] → Ndef(\granular).set(key, val)
-\matoma_gran_load   /matoma/granular/load    [path]     → Buffer.read(path)
-\matoma_spectral    /matoma/spectral/param   [key, val] → Ndef(\spectral).set(key, val)
-\matoma_scene       /matoma/scene            [name]     → シーン別パラメーター一括設定
+\matoma_param            /matoma/param                [key, val] → currentSynth.set(key, val)
+\matoma_drone            /matoma/drone/param          [key, val] → SynthDef(\matoma_drone).set()
+\matoma_granular         /matoma/granular/param       [key, val] → Ndef(\granular).set(key, val)
+\matoma_gran_load        /matoma/granular/load        [path]     → Buffer.read(path)
+\matoma_gran_synth_start /matoma/gran_synth/start     —          → SynthDef インスタンス起動 NEW
+\matoma_gran_synth_stop  /matoma/gran_synth/stop      —          → gate=0 フェードアウト NEW
+\matoma_gran_synth_param /matoma/gran_synth/param     [key, val] → パラメーター変更 NEW
+\matoma_spectral         /matoma/spectral/param       [key, val] → Ndef(\spectral).set(key, val)
+\matoma_scene            /matoma/scene                [name]     → シーン別パラメーター一括設定
 (+ percussion.scd 内 22個のOSCdef)
 ```

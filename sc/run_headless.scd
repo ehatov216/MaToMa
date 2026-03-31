@@ -1260,6 +1260,33 @@ s.waitForBoot({
     s.sync;
     "グリッチシンセ (3種) ロード完了".postln;
 
+    // ══════════════════════════════════════════════════════════════════
+    // ■ STEP 8d: GRAN SYNTH — バッファ不要グラニュラーシンセ（独立型）
+    //
+    //   GrainSin ベース。Drone に依存しない自己完結した持続音源。
+    //   density=35 / grainDur=0.18s → 同時に ~6粒 → 途切れない持続音。
+    //   Layer A（3階層有機モジュレーション）を drone.scd と同設計で搭載。
+    //   起動後はオフ状態（OSC /matoma/gran_synth/start で開始）。
+    // ══════════════════════════════════════════════════════════════════
+    load(~matomaScDir +/+ "gran_synth.scd");
+    s.sync;
+    "グラニュラーシンセ (バッファ不要・独立型) ロード完了".postln;
+
+    // ══════════════════════════════════════════════════════════════════
+    // ■ STEP 8e: GRAN SAMPLER — グラニュラーサンプラー（ファイル読み込み型）
+    //
+    //   GrainBuf ベース。外部WAV/AIFFを読み込んで粒状分解する。
+    //   【前回の失敗原因の修正】
+    //     - SC側に /matoma/granular/load ハンドラが存在しなかった
+    //     - Buffer.readChannel でモノラル強制（ステレオ不整合防止）
+    //     - ロード完了後のみ Synth 起動可能（バッファ確認を必須化）
+    //   起動後はオフ状態（OSC /matoma/gran_sampler/load でファイルをロード後、
+    //   /matoma/gran_sampler/start で開始）。
+    // ══════════════════════════════════════════════════════════════════
+    load(~matomaScDir +/+ "gran_sampler.scd");
+    s.sync;
+    "グラニュラーサンプラー (ファイル読み込み型) ロード完了".postln;
+
     ~currentGlitchGendy = nil;
     ~currentGlitchChaos = nil;
     ~currentGlitchBurst = nil;
@@ -1388,6 +1415,8 @@ s.waitForBoot({
             s.freeAll;
             ~currentDrone = nil;
             ~currentGranular = nil;
+            ~currentGranSynth = nil;
+            ~currentGranSampler = nil;
             ~currentGlitchGendy = nil;
             ~currentGlitchChaos = nil;
             ~currentGlitchBurst = nil;
@@ -1405,6 +1434,8 @@ s.waitForBoot({
             s.freeAll;
             ~currentDrone = nil;
             ~currentGranular = nil;
+            ~currentGranSynth = nil;
+            ~currentGranSampler = nil;
             ~turingRoutine !? { ~turingRoutine.stop; ~turingRoutine = nil; };
             ~percRoutine   !? { ~percRoutine.stop;  ~percRoutine  = nil; };
             "【再セットアップ】リセット中...".postln;
@@ -1442,6 +1473,10 @@ s.waitForBoot({
     "  Drone Gen (5種) : /matoma/drone/[fm|noise|wavetable|feedback|sines]/start|stop|param".postln;
     "                    /matoma/drone/all/stop".postln;
     "  Glitch Synths  : /matoma/glitch/[gendy|chaos|burst]/start|stop|param".postln;
+    "  Gran Synth     : /matoma/gran_synth/start|stop|param".postln;
+    "    param        : freq, density, grainDur, spread, panSpread, bright, chaos, room, amp".postln;
+    "  Gran Sampler   : /matoma/gran_sampler/load|start|stop|param|unload".postln;
+    "    param        : density, pos, posScatter, rate, grainSize, spray, room, amp".postln;
     "    gendy param  : chaos, pitch, density, amp".postln;
     "    chaos param  : rate, fmDepth, layers, filter, bits, amp".postln;
     "    burst param  : density, freq, decay, harmonics, spread, pattern, amp".postln;

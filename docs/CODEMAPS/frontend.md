@@ -1,11 +1,11 @@
-<!-- Generated: 2026-03-29 | Files scanned: frontend/index.html | Token estimate: ~550 -->
+<!-- Generated: 2026-03-31 | Files scanned: frontend/index.html | Token estimate: ~580 -->
 # Frontend Architecture
 
 ## Stack
 
 - HTML5 + 純JavaScript（フレームワーク不使用）
 - WebSocket: `ws://localhost:8765`
-- 1ファイル構成: `frontend/index.html` (1551行)
+- 1ファイル構成: `frontend/index.html` (1551行 + GRAN SYNTH パネル)
 
 ## UI モジュール一覧
 
@@ -14,7 +14,8 @@
 | SCENE | #4ade80 緑 | 4プリセット切替 | `/matoma/scene` |
 | DRONE | #60a5fa 青 | ドローン・アンビエント | `/matoma/drone/param` |
 | SYNTH | #fbbf24 オレンジ | FM合成シンセ | `/matoma/param` |
-| GRANULAR | #fb923c 薄橙 | グラニュラーサンプラー | `/matoma/granular/*` |
+| GRANULAR | #fb923c 薄橙 | グラニュラーサンプラー（バッファベース） | `/matoma/granular/*` |
+| GRAN SYNTH | #8b7355 (tan) | グラニュラーシンセ（バッファ不要・独立型） | `/matoma/gran_synth/*` NEW |
 | SPECTRAL | #e879f9 マゼンタ | スペクトル処理 | `/matoma/spectral/param` |
 | SEQ | #d4f74c ライム | Turingシーケンサー | `/matoma/seq/*` |
 | AUTONOMOUS | #a78bfa 紫 | 自律モード | `/matoma/auto/*` |
@@ -32,6 +33,39 @@ Sliders:
   revtime  (1-30s)   ← リバーブ残響時間
   amp      (0-1)
   breathe  (0-1)     ← 振幅変調の深さ
+```
+
+## GRANULAR モジュール 詳細
+
+```
+Parameters (バッファベース):
+  pos     (0-1)      再生位置
+  density (1-50)     グレイン/秒
+  spread  (0-1)      ピッチばらつき
+  amp     (0-1)      音量
+Buffer Load ボタン
+```
+
+## GRAN SYNTH モジュール 詳細 NEW
+
+```
+Start / Stop ボタン
+Parameters (バッファ不要・GrainSin):
+  freq      (40-220 Hz)   基本周波数（Hz）
+  density   (5-60)        グレイン/秒
+  grainDur  (0.05-0.5s)   グレイン長
+  spread    (0-1.0)       ピッチ散乱
+  panSpread (0-1.0)       ステレオ広がり
+  bright    (0-1.0)       オクターブ上層量
+  chaos     (0-1.0)       有機モジュレーション深さ
+  room      (0-1.0)       リバーブ量
+  amp       (0-1.0)       音量
+
+特徴:
+  - Droneに依存しない独立型
+  - バッファロード不要
+  - Layer A 3階層有機モジュレーション（drone.scdと同設計）
+  - attack 2s / release 5s でゆっくり立ち上がり・消滅
 ```
 
 ## SEQ モジュール 詳細

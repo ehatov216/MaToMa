@@ -383,6 +383,162 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
       </div>
     </div>
 
+    <!-- GRAN SYNTH -->
+    <div class="mod">
+      <div class="mhdr">
+        <div class="mbar" style="background:var(--c-gran)"></div>
+        <div class="mname" style="color:var(--c-gran)">GRAN SYNTH</div>
+      </div>
+      <div class="mbody">
+        <button class="glitch-src-btn" id="btn-gransyn" onclick="granSynthToggle()" style="width:100%;margin-bottom:6px">OFF</button>
+
+        <div class="msub">PITCH</div>
+        <div class="sr" style="--thumb:var(--c-gran)">
+          <div class="sl"><b>FREQ</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.42" id="s-gsf"
+            oninput="granSynthFreq(+this.value)">
+          <div class="sv" id="v-gsf">110 Hz</div>
+        </div>
+
+        <div class="msub">TEXTURE</div>
+        <div class="sr" style="--thumb:var(--c-gran)">
+          <div class="sl"><b>DENSITY</b></div>
+          <input type="range" min="5" max="60" step="1" value="35" id="s-gsd"
+            oninput="granSynthParam('density',+this.value,'v-gsd',Math.round(+this.value)+' g/s')">
+          <div class="sv" id="v-gsd">35 g/s</div>
+        </div>
+        <div class="sr" style="--thumb:var(--c-gran)">
+          <div class="sl"><b>GRAIN DUR</b></div>
+          <input type="range" min="0.05" max="0.5" step="0.01" value="0.18" id="s-gsg"
+            oninput="granSynthParam('grainDur',+this.value,'v-gsg',Math.round(+this.value*1000)+'ms')">
+          <div class="sv" id="v-gsg">180ms</div>
+        </div>
+
+        <div class="msub">TIMBRE</div>
+        <div class="sr" style="--thumb:var(--c-gran)">
+          <div class="sl"><b>SPREAD</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.20" id="s-gss"
+            oninput="granSynthParam('spread',+this.value,'v-gss')">
+          <div class="sv" id="v-gss">0.20</div>
+        </div>
+        <div class="sr" style="--thumb:var(--c-gran)">
+          <div class="sl"><b>BRIGHT</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.40" id="s-gsb"
+            oninput="granSynthParam('bright',+this.value,'v-gsb')">
+          <div class="sv" id="v-gsb">0.40</div>
+        </div>
+
+        <div class="msub">SPACE</div>
+        <div class="sr" style="--thumb:var(--c-gran)">
+          <div class="sl"><b>CHAOS</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.30" id="s-gsc"
+            oninput="granSynthParam('chaos',+this.value,'v-gsc')">
+          <div class="sv" id="v-gsc">0.30</div>
+        </div>
+        <div class="sr" style="--thumb:var(--c-gran)">
+          <div class="sl"><b>ROOM</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.60" id="s-gsr"
+            oninput="granSynthParam('room',+this.value,'v-gsr')">
+          <div class="sv" id="v-gsr">0.60</div>
+        </div>
+        <div class="sr" style="--thumb:var(--c-gran)">
+          <div class="sl"><b>AMP</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.40" id="s-gsa"
+            oninput="granSynthParam('amp',+this.value,'v-gsa')">
+          <div class="sv" id="v-gsa">0.40</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- GRAN SAMPLER -->
+    <div class="mod">
+      <div class="mhdr">
+        <div class="mbar" style="background:#2dd4bf"></div>
+        <div class="mname" style="color:#2dd4bf">GRAN SAMPLER</div>
+      </div>
+      <div class="mbody">
+        <!-- ファイル選択 -->
+        <div class="msub">FILE</div>
+        <button class="glitch-src-btn" onclick="granSamplerBrowse()"
+          style="width:100%;margin-bottom:4px">SELECT FILE</button>
+        <div id="v-gsamp-file"
+          style="font-size:.55rem;color:#888;margin-bottom:6px;
+                 overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          — no file —
+        </div>
+
+        <!-- ON/OFF -->
+        <button class="glitch-src-btn" id="btn-gsampler"
+          onclick="granSamplerToggle()" style="width:100%;margin-bottom:6px">
+          OFF
+        </button>
+
+        <!-- PLAYBACK -->
+        <div class="msub">PLAYBACK</div>
+        <div class="sr" style="--thumb:#2dd4bf">
+          <div class="sl"><b>POSITION</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.50"
+            id="s-gsp" oninput="granSamplerParam('pos',+this.value,'v-gsp')">
+          <div class="sv" id="v-gsp">0.50</div>
+        </div>
+        <div class="sr" style="--thumb:#2dd4bf">
+          <div class="sl"><b>RATE</b></div>
+          <input type="range" min="0.25" max="4.0" step="0.01" value="1.00"
+            id="s-gsr2"
+            oninput="granSamplerParam('rate',+this.value,'v-gsr2')">
+          <div class="sv" id="v-gsr2">1.00</div>
+        </div>
+        <div class="sr" style="--thumb:#2dd4bf">
+          <div class="sl"><b>SCATTER</b></div>
+          <input type="range" min="0" max="0.3" step="0.005" value="0.08"
+            id="s-gsc2"
+            oninput="granSamplerParam('posScatter',+this.value,'v-gsc2')">
+          <div class="sv" id="v-gsc2">0.08</div>
+        </div>
+
+        <!-- TEXTURE -->
+        <div class="msub">TEXTURE</div>
+        <div class="sr" style="--thumb:#2dd4bf">
+          <div class="sl"><b>DENSITY</b></div>
+          <input type="range" min="5" max="60" step="1" value="20"
+            id="s-gsd2" oninput="granSamplerParam('density',+this.value,
+            'v-gsd2',Math.round(+this.value)+' g/s')">
+          <div class="sv" id="v-gsd2">20 g/s</div>
+        </div>
+        <div class="sr" style="--thumb:#2dd4bf">
+          <div class="sl"><b>GRAIN DUR</b></div>
+          <input type="range" min="0.05" max="0.5" step="0.01" value="0.15"
+            id="s-gsg2" oninput="granSamplerParam('grainSize',+this.value,
+            'v-gsg2',Math.round(+this.value*1000)+'ms')">
+          <div class="sv" id="v-gsg2">150ms</div>
+        </div>
+        <div class="sr" style="--thumb:#2dd4bf">
+          <div class="sl"><b>SPRAY</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.30"
+            id="s-gsy"
+            oninput="granSamplerParam('spray',+this.value,'v-gsy')">
+          <div class="sv" id="v-gsy">0.30</div>
+        </div>
+
+        <!-- SPACE -->
+        <div class="msub">SPACE</div>
+        <div class="sr" style="--thumb:#2dd4bf">
+          <div class="sl"><b>ROOM</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.40"
+            id="s-gsrm"
+            oninput="granSamplerParam('room',+this.value,'v-gsrm')">
+          <div class="sv" id="v-gsrm">0.40</div>
+        </div>
+        <div class="sr" style="--thumb:#2dd4bf">
+          <div class="sl"><b>AMP</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.50"
+            id="s-gsam"
+            oninput="granSamplerParam('amp',+this.value,'v-gsam')">
+          <div class="sv" id="v-gsam">0.50</div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- #left-col -->
 
   <!-- MID: 3本の笛 + 操作コントロール -->
@@ -739,6 +895,22 @@ function handleMessage(m) {
   else if (t === 'turing_state')   { updateTuringState(m.state || {}); }
   else if (t === 'turing_tick')    { updateTuringState(m); }
   else if (t === 'audio_devices')  { updateDeviceSelect(m.current || '', m.devices || []); }
+  else if (t === 'gran_sampler_file_selected') {
+    const name = m.path ? m.path.split('/').pop() : '?';
+    document.getElementById('v-gsamp-file').textContent = name;
+    document.getElementById('v-gsamp-file').title = m.path || '';
+    addLog('/gran_sampler', 'loading: ' + name);
+  }
+  else if (t === 'gran_sampler_loaded') {
+    const name = m.path ? m.path.split('/').pop() : '?';
+    document.getElementById('v-gsamp-file').textContent =
+      name + ' (' + m.duration + 's)';
+    addLog('/gran_sampler', 'loaded: ' + name);
+  }
+  else if (t === 'gran_sampler_load_error') {
+    document.getElementById('v-gsamp-file').textContent = '⚠ ' + m.message;
+    addLog('/gran_sampler', 'error: ' + m.message);
+  }
   else { addLog(t || m.address || '?', JSON.stringify(m.args || m.params || {})); }
 }
 
@@ -1281,6 +1453,72 @@ function glitchAllStop() {
     }
   });
   addLog('/glitch', 'all stop');
+}
+
+// ── GRAN SYNTH ────────────────────────────────────────────
+// GrainSin ベースのバッファ不要グラニュラーシンセ（独立型）
+// OSC: /matoma/gran_synth/start|stop|param
+let granSynthActive = false;
+
+function granSynthToggle() {
+  const btn = document.getElementById('btn-gransyn');
+  granSynthActive = !granSynthActive;
+  if (granSynthActive) {
+    btn.classList.add('on');
+    btn.textContent = 'ON';
+    send({ address: '/matoma/gran_synth/start', args: [] });
+    addLog('/gran_synth', 'start');
+  } else {
+    btn.classList.remove('on');
+    btn.textContent = 'OFF';
+    send({ address: '/matoma/gran_synth/stop', args: [] });
+    addLog('/gran_synth', 'stop');
+  }
+}
+
+// FREQ: スライダー 0-1 → 40-440Hz 対数マッピング（A1〜A4）
+function granSynthFreq(v) {
+  const hz = Math.round(40 * Math.pow(440 / 40, v));
+  document.getElementById('v-gsf').textContent = hz + ' Hz';
+  send({ address: '/matoma/gran_synth/param', args: ['freq', hz] });
+}
+
+// 汎用パラメーター送信（dispVal を省略すると val.toFixed(2) で表示）
+function granSynthParam(param, val, vid, dispVal) {
+  document.getElementById(vid).textContent =
+    dispVal !== undefined ? dispVal : val.toFixed(2);
+  send({ address: '/matoma/gran_synth/param', args: [param, val] });
+}
+
+// ── GRAN SAMPLER ──────────────────────────────────────────
+// GrainBuf ベースのファイル読み込み型グラニュラーサンプラー
+// 手順: FILE SELECT → ロード確認 → ON/OFF
+let granSamplerActive = false;
+
+function granSamplerBrowse() {
+  send({ address: '/matoma/gran_sampler/browse', args: [] });
+}
+
+function granSamplerToggle() {
+  const btn = document.getElementById('btn-gsampler');
+  granSamplerActive = !granSamplerActive;
+  if (granSamplerActive) {
+    btn.classList.add('on');
+    btn.textContent = 'ON';
+    send({ address: '/matoma/gran_sampler/start', args: [] });
+    addLog('/gran_sampler', 'start');
+  } else {
+    btn.classList.remove('on');
+    btn.textContent = 'OFF';
+    send({ address: '/matoma/gran_sampler/stop', args: [] });
+    addLog('/gran_sampler', 'stop');
+  }
+}
+
+function granSamplerParam(param, val, vid, dispVal) {
+  document.getElementById(vid).textContent =
+    dispVal !== undefined ? dispVal : val.toFixed(2);
+  send({ address: '/matoma/gran_sampler/param', args: [param, val] });
 }
 
 // ── INIT ──────────────────────────────────────────────────
