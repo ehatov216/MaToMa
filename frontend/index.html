@@ -798,30 +798,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
           </div>
         </div>
 
-        <div class="msub" style="margin-top:.4rem">GRAN SYNTH</div>
-        <div class="chaos-row">
-          <div class="chaos-hd">
-            <span class="chaos-key">chaos</span>
-            <span class="chaos-val" id="cv-gsynth-chaos">—</span>
-          </div>
-          <div class="chaos-bar-wrap">
-            <div class="chaos-bar" id="cb-gsynth-chaos"
-              style="width:0%;background:var(--c-gran)"></div>
-            <div class="chaos-attractor" id="ca-gsynth-chaos" style="display:none"></div>
-          </div>
-        </div>
-        <div class="chaos-row">
-          <div class="chaos-hd">
-            <span class="chaos-key">density</span>
-            <span class="chaos-val" id="cv-gsynth-density">—</span>
-          </div>
-          <div class="chaos-bar-wrap">
-            <div class="chaos-bar" id="cb-gsynth-density"
-              style="width:0%;background:var(--c-gran)"></div>
-            <div class="chaos-attractor" id="ca-gsynth-density" style="display:none"></div>
-          </div>
-        </div>
-
         <div class="msub" style="margin-top:.4rem">TURING</div>
         <div class="chaos-row">
           <div class="chaos-hd">
@@ -1212,14 +1188,6 @@ function updateChaosState(params) {
     const rows = [
       { key:'gran-density', src:g.density, min:1,  max:80, fmt:v=>Math.round(v).toString() },
       { key:'gran-spray',   src:g.spray,   min:0,  max:1,  fmt:v=>v.toFixed(2) },
-    ];
-    for (const r of rows) { if (r.src != null) { const u=_unpack(r.src); updateChaosBar(r.key,u.val,u.att,r.min,r.max,r.fmt); } }
-  }
-  if (params.gran_synth) {
-    const gs = params.gran_synth;
-    const rows = [
-      { key:'gsynth-chaos',   src:gs.chaos,   min:0,  max:1,  fmt:v=>v.toFixed(2) },
-      { key:'gsynth-density', src:gs.density, min:5, max:60, fmt:v=>Math.round(v).toString() },
     ];
     for (const r of rows) { if (r.src != null) { const u=_unpack(r.src); updateChaosBar(r.key,u.val,u.att,r.min,r.max,r.fmt); } }
   }

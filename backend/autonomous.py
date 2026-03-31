@@ -412,8 +412,8 @@ _DEFAULT_CHAOS_PARAMS: dict[str, _LayerParams] = {
         "amp":          (0.35,  0.35,  0.08,  0.02),
     },
     "granular": {
-        # density: 速度0.25 × range20 = 5粒/step → 数秒でスカ↔密に変化
-        "density": (10.0,  10.0,  20.0,  0.25),
+        # density: attractor=15, range=10 → 常に5以上を保証（負の値を防ぐ）
+        "density": (15.0,  15.0,  10.0,  0.25),
         # spray: 規則↔ランダムが数秒でスイング
         "spray":   (0.5,   0.5,   0.4,   0.12),
         "pos":     (0.5,   0.5,   0.4,   0.10),
@@ -423,12 +423,8 @@ _DEFAULT_CHAOS_PARAMS: dict[str, _LayerParams] = {
         # prob: Turing Machine の変異量が1〜2分かけて緩やかに変化
         "prob": (0.3,  0.3,  0.3,  0.06),
     },
-    "gran_synth": {
-        # chaos: 有機モジュレーション深さ。ゆっくりと表情を変える
-        "chaos":   (0.3,  0.3,  0.4,  0.06),
-        # density: 粒の密度。SC側で5-60の範囲を受け付ける
-        "density": (35.0, 35.0, 20.0, 0.15),
-    },
+    # gran_synth は FLUTE スライダーで手動制御するため ChaosEngine から除外
+    # （自動変調が 10回/秒で手動操作を上書きするため操作性が損なわれる）
 }
 
 
