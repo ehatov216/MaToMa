@@ -162,6 +162,21 @@ class TuringGene:
             root_midi=self._dna.root_midi,
         )
 
+    def set_mutation_bars(self, bars: int) -> None:
+        """GUIから変異ティック間隔を上書きする。
+
+        mutation_bars が小さいほど速くシフトレジスタが変化する。
+        公式: interval = (60/BPM) * 4 * mutation_bars
+        """
+        clamped = max(1, min(32, int(bars)))
+        self._dna = TuringGeneDNA(
+            mutation_prob=self._dna.mutation_prob,
+            scale=self._dna.scale,
+            step_count=self._dna.step_count,
+            mutation_bars=clamped,
+            root_midi=self._dna.root_midi,
+        )
+
     def set_scene_dna(self, scene_name: str) -> None:
         """シーン切替時に DNA を更新する。
 

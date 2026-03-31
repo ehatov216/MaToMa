@@ -278,6 +278,13 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
         </div>
         <div class="turing-reg" id="turing-reg"></div>
         <div class="turing-info" id="turing-info">—</div>
+        <div class="sr" style="--thumb:var(--c-turing);margin-top:.4rem">
+          <div class="sl"><b>SPEED</b></div>
+          <input type="range" min="1" max="16" step="1" value="8"
+            id="s-tur-bars"
+            oninput="turingBars(+this.value)">
+          <div class="sv" id="v-tur-bars">8 bars</div>
+        </div>
       </div>
     </div>
 
@@ -1042,6 +1049,13 @@ function masterSend(rawVal) {
 }
 
 // ── TURING GENE ───────────────────────────────────────────
+function turingBars(bars) {
+  // bars: 1=最速(1小節) 〜 16=最遅(16小節)
+  // 表示は逆順の「速さ」感で分かりやすくする
+  document.getElementById('v-tur-bars').textContent = bars + ' bars';
+  send({ address: '/matoma/turing/mutation_bars', args: [bars] });
+}
+
 function turingToggle() {
   turingRunning = !turingRunning;
   const btn = document.getElementById('btn-turing-toggle');

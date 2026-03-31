@@ -851,6 +851,11 @@ async def _handle_turing(address: str, args: list, websocket) -> None:
         await broadcast({"type": "turing_state", "state": state})
         log.info("TuringGene 停止")
 
+    elif sub == "mutation_bars":
+        if turing_gene is not None and args:
+            turing_gene.set_mutation_bars(int(float(args[0])))
+            log.info(f"TuringGene mutation_bars: {args[0]}")
+
     elif sub == "state":
         state = turing_gene.get_state() if turing_gene is not None else {}
         await websocket.send(
