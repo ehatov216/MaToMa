@@ -833,38 +833,57 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
       </div>
       <div class="mbody">
 
-        <!-- START / STOP -->
+        <!-- CHAOS ENGINE START/STOP -->
+        <!-- percussion.scd は CHAOS ENGINE（ポアソン過程）のみで駆動 -->
+        <!-- OSC: /matoma/perc/chaos/start|stop|density|amp|weights -->
         <div class="perc-start-stop">
           <button class="perc-ss-btn" id="btn-perc-toggle" onclick="percToggle()">▶ START</button>
         </div>
 
-        <!-- BPM -->
-        <div class="perc-bpm-row">
-          <div class="sl"><b>BPM</b></div>
-          <input type="range" id="s-perc-bpm" style="--thumb:var(--c-rhythmic)"
-            min="60" max="200" value="120" step="1"
-            oninput="percBpm(this.value)">
-          <div class="sv" id="v-perc-bpm" style="color:var(--c-rhythmic)">120</div>
+        <!-- DENSITY: 平均イベント数/秒 -->
+        <div class="sr" style="--thumb:var(--c-rhythmic)">
+          <div class="sl"><b>DENSITY</b></div>
+          <input type="range" min="0.5" max="20" step="0.5" value="4"
+            id="s-perc-density"
+            oninput="percParam('density',+this.value,'v-perc-density',v=>v.toFixed(1)+'/s')">
+          <div class="sv" id="v-perc-density">4.0/s</div>
         </div>
 
-        <!-- 確率コントロール -->
+        <!-- AMP: 発音確率の強さ -->
         <div class="sr" style="--thumb:var(--c-rhythmic)">
-          <div class="sl"><b>TRIG</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.80"
-            id="s-seq-trig"
-            oninput="seqProb('trig_prob',+this.value,'v-seq-trig')">
-          <div class="sv" id="v-seq-trig">0.80</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-rhythmic)">
-          <div class="sl"><b>MUTATE</b></div>
-          <input type="range" min="0" max="0.3" step="0.005" value="0.05"
-            id="s-seq-mut"
-            oninput="seqProb('mutation',+this.value,'v-seq-mut')">
-          <div class="sv" id="v-seq-mut">0.05</div>
+          <div class="sl"><b>AMP</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.60"
+            id="s-perc-amp"
+            oninput="percParam('amp',+this.value,'v-perc-amp')">
+          <div class="sv" id="v-perc-amp">0.60</div>
         </div>
 
-        <!-- 4 tracks × 16 steps -->
-        <div class="perc-tracks" id="perc-tracks"></div>
+        <!-- WEIGHTS: 楽器の選択確率 -->
+        <div class="msub">WEIGHTS</div>
+        <div class="sr" style="--thumb:var(--c-rhythmic)">
+          <div class="sl"><b>KICK</b></div>
+          <input type="range" min="0" max="1" step="0.05" value="0.40"
+            id="s-perc-w-kick" oninput="percWeights()">
+          <div class="sv" id="v-perc-w-kick">0.40</div>
+        </div>
+        <div class="sr" style="--thumb:var(--c-rhythmic)">
+          <div class="sl"><b>SNARE</b></div>
+          <input type="range" min="0" max="1" step="0.05" value="0.30"
+            id="s-perc-w-snare" oninput="percWeights()">
+          <div class="sv" id="v-perc-w-snare">0.30</div>
+        </div>
+        <div class="sr" style="--thumb:var(--c-rhythmic)">
+          <div class="sl"><b>HIHAT</b></div>
+          <input type="range" min="0" max="1" step="0.05" value="0.20"
+            id="s-perc-w-hihat" oninput="percWeights()">
+          <div class="sv" id="v-perc-w-hihat">0.20</div>
+        </div>
+        <div class="sr" style="--thumb:var(--c-rhythmic)">
+          <div class="sl"><b>CLAP</b></div>
+          <input type="range" min="0" max="1" step="0.05" value="0.10"
+            id="s-perc-w-clap" oninput="percWeights()">
+          <div class="sv" id="v-perc-w-clap">0.10</div>
+        </div>
 
       </div>
     </div>
@@ -893,8 +912,7 @@ let currentDroneGen   = null;
 let percRunning       = false;
 
 // PERC ステップ状態: tracks[trackIdx][stepIdx] = 0|1
-const PERC_TRACKS = ['kick','snare','hihat','clap'];
-const percSteps   = PERC_TRACKS.map(() => new Array(16).fill(0));
+// PERC_TRACKS / percSteps はステップシーケンサー廃止により削除
 
 // ── WebSocket ──────────────────────────────────────────────
 function connect() {
@@ -1359,144 +1377,45 @@ function fxParam(fx, param, rawVal, vidId, fmt) {
   send({ address: '/matoma/effect/' + fx + '/param', args: [param, v] });
 }
 
-// ── PERC ──────────────────────────────────────────────────
-function seqProb(sub, val, vid) {
-  document.getElementById(vid).textContent = val.toFixed(2);
-  send({ address: '/matoma/seq/' + sub, args: [val] });
-}
+// ── PERC (CHAOS ENGINE) ───────────────────────────────────
+// percussion.scd は CHAOS ENGINE（ポアソン過程）のみで駆動
+// OSC: /matoma/perc/chaos/start|stop|density|amp|weights
 
 function percToggle() {
   percRunning = !percRunning;
   const btn = document.getElementById('btn-perc-toggle');
   const st  = document.getElementById('perc-status');
   if (percRunning) {
-    send({ address: '/matoma/perc/start', args: [] });
-    if (btn) { btn.classList.add('on'); btn.textContent = '▶ START'; }
+    send({ address: '/matoma/perc/chaos/start', args: [] });
+    if (btn) { btn.classList.add('on'); btn.textContent = '■ STOP'; }
     if (st)  { st.textContent = '動作中'; st.style.color = 'var(--c-rhythmic)'; }
-    addLog('/perc', 'START');
+    addLog('/perc/chaos', 'start');
   } else {
-    send({ address: '/matoma/perc/stop', args: [] });
+    send({ address: '/matoma/perc/chaos/stop', args: [] });
     if (btn) { btn.classList.remove('on'); btn.textContent = '▶ START'; }
     if (st)  { st.textContent = '停止'; st.style.color = 'var(--dim)'; }
-    addLog('/perc', 'STOP');
+    addLog('/perc/chaos', 'stop');
   }
 }
 
-function percBpm(rawVal) {
-  const v = Math.round(parseFloat(rawVal));
-  document.getElementById('v-perc-bpm').textContent = v;
-  send({ address: '/matoma/perc/bpm', args: [v] });
-  // マスターBPMスライダーとも同期
-  const masterSlider = document.getElementById('s-bpm');
-  if (masterSlider && Math.abs(parseFloat(masterSlider.value) - v) > 0.5) {
-    masterSlider.value = v;
-    document.getElementById('v-bpm').textContent = v;
-    send({ address: '/matoma/seq/bpm', args: [v] });
-  }
+// density: 平均イベント数/秒 → /matoma/perc/chaos/density
+// amp: 発音確率の強さ → /matoma/perc/chaos/amp
+function percParam(sub, val, vid, fmt) {
+  document.getElementById(vid).textContent = fmt ? fmt(val) : val.toFixed(2);
+  send({ address: '/matoma/perc/chaos/' + sub, args: [val] });
 }
 
-function percStepToggle(trackIdx, stepIdx) {
-  percSteps[trackIdx][stepIdx] ^= 1;
-  const val = percSteps[trackIdx][stepIdx];
-  const btn = document.getElementById('step-' + trackIdx + '-' + stepIdx);
-  if (btn) {
-    btn.classList.toggle('on', val === 1);
-  }
-  send({ address: '/matoma/perc/step', args: [trackIdx, stepIdx, val] });
-}
-
-function percEuclid(trackIdx) {
-  const hits = Math.floor(Math.random() * 8) + 1; // 1〜8
-  send({ address: '/matoma/perc/euclid', args: [trackIdx, hits] });
-  addLog('/perc/euclid', PERC_TRACKS[trackIdx] + ' hits=' + hits);
-  // UIのステップは euclid_result メッセージで更新（またはローカル生成）
-  const pattern = makeEuclid(hits, 16);
-  pattern.forEach((v, i) => {
-    percSteps[trackIdx][i] = v;
-    const btn = document.getElementById('step-' + trackIdx + '-' + i);
-    if (btn) btn.classList.toggle('on', v === 1);
-  });
-}
-
-function percClear(trackIdx) {
-  percSteps[trackIdx].fill(0);
-  for (let i = 0; i < 16; i++) {
-    const btn = document.getElementById('step-' + trackIdx + '-' + i);
-    if (btn) btn.classList.remove('on');
-  }
-  send({ address: '/matoma/perc/clear', args: [trackIdx] });
-  addLog('/perc/clear', PERC_TRACKS[trackIdx]);
-}
-
-// Bjorklundアルゴリズム（ユークリッドリズム生成）
-function makeEuclid(hits, steps) {
-  if (hits <= 0) return new Array(steps).fill(0);
-  if (hits >= steps) return new Array(steps).fill(1);
-  let pattern = [];
-  for (let i = 0; i < steps; i++) {
-    pattern.push(i < hits ? [1] : [0]);
-  }
-  function distribute(a, b) {
-    if (b.length <= 1) return a.map((x, i) => x.concat(b[i % b.length] || []));
-    const q = Math.min(a.length, b.length);
-    const newA = a.slice(0, q).map((x, i) => x.concat(b[i]));
-    const rem  = a.length > b.length ? a.slice(q) : b.slice(q);
-    if (rem.length === 0) return newA;
-    return distribute(newA, rem);
-  }
-  const ones  = pattern.filter(x => x[0] === 1);
-  const zeros = pattern.filter(x => x[0] === 0);
-  const result = distribute(ones, zeros);
-  return result.flat();
-}
-
-// PERCトラックのHTML初期生成
-function initPercTracks() {
-  const container = document.getElementById('perc-tracks');
-  if (!container) return;
-  PERC_TRACKS.forEach((name, ti) => {
-    const track = document.createElement('div');
-    track.className = 'perc-track';
-
-    const hdr = document.createElement('div');
-    hdr.className = 'perc-track-hdr';
-
-    const label = document.createElement('div');
-    label.className = 'perc-track-name';
-    label.textContent = name.toUpperCase();
-
-    const btns = document.createElement('div');
-    btns.className = 'perc-track-btns';
-
-    const eucBtn = document.createElement('button');
-    eucBtn.className = 'perc-ctrl-btn';
-    eucBtn.textContent = 'EUCL';
-    eucBtn.onclick = () => percEuclid(ti);
-
-    const clrBtn = document.createElement('button');
-    clrBtn.className = 'perc-ctrl-btn';
-    clrBtn.textContent = 'CLR';
-    clrBtn.onclick = () => percClear(ti);
-
-    btns.append(eucBtn, clrBtn);
-    hdr.append(label, btns);
-
-    const steps = document.createElement('div');
-    steps.className = 'perc-steps';
-
-    for (let si = 0; si < 16; si++) {
-      const btn = document.createElement('button');
-      btn.className = 'step-btn ' + name;
-      btn.id = 'step-' + ti + '-' + si;
-      // 4拍子区切りで薄い境界を表現
-      if (si % 4 === 0 && si > 0) btn.style.marginLeft = '3px';
-      btn.onclick = () => percStepToggle(ti, si);
-      steps.appendChild(btn);
-    }
-
-    track.append(hdr, steps);
-    container.appendChild(track);
-  });
+// weights: kick/snare/hihat/clap の選択重み → /matoma/perc/chaos/weights
+function percWeights() {
+  const k = +document.getElementById('s-perc-w-kick').value;
+  const s = +document.getElementById('s-perc-w-snare').value;
+  const h = +document.getElementById('s-perc-w-hihat').value;
+  const c = +document.getElementById('s-perc-w-clap').value;
+  document.getElementById('v-perc-w-kick').textContent  = k.toFixed(2);
+  document.getElementById('v-perc-w-snare').textContent = s.toFixed(2);
+  document.getElementById('v-perc-w-hihat').textContent = h.toFixed(2);
+  document.getElementById('v-perc-w-clap').textContent  = c.toFixed(2);
+  send({ address: '/matoma/perc/chaos/weights', args: [k, s, h, c] });
 }
 
 // ── キーボードショートカット ──────────────────────────────
@@ -1616,7 +1535,6 @@ function granSamplerParam(param, val, vid, dispVal) {
 // KLANKドローンは起動時に自動スタートしているのでデフォルトON
 activeDroneGens.add('klank');
 
-initPercTracks();
 connect();
 </script>
 </body>
