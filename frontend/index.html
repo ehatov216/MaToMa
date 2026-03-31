@@ -578,9 +578,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
         <div class="sr" style="--thumb:var(--c-drone)">
           <div class="sl"><b>BRIGHTNESS</b></div>
           <input type="range" id="s-brightness"
-            min="0" max="1" value="0.5" step="0.01"
+            min="0" max="1" value="0.65" step="0.01"
             oninput="fluteSend('brightness',this.value,'v-brightness',v=>v.toFixed(2))">
-          <div class="sv" id="v-brightness">0.50</div>
+          <div class="sv" id="v-brightness">0.65</div>
         </div>
 
         <hr style="border:none;border-top:1px solid var(--border);margin:.42rem 0">
@@ -709,7 +709,35 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
         <span id="chaos-status" style="font-size:.57rem;color:var(--dim);margin-left:.3rem">待機</span>
       </div>
       <div class="mbody" id="chaos-body">
-        <div class="msub">DRONE</div>
+        <!-- CHAOS ENGINE コントロール -->
+        <div style="display:flex;gap:4px;margin-bottom:6px">
+          <button class="glitch-src-btn" id="btn-chaos-toggle"
+            onclick="chaosToggle()" style="flex:1">START</button>
+        </div>
+        <div class="sr" style="--thumb:var(--c-auto)">
+          <div class="sl"><b>SPEED</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.30"
+            id="s-ch-spd"
+            oninput="chaosSend('/matoma/chaos/speed',+this.value,'v-ch-spd')">
+          <div class="sv" id="v-ch-spd">0.30</div>
+        </div>
+        <div class="sr" style="--thumb:var(--c-auto)">
+          <div class="sl"><b>PROB</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.70"
+            id="s-ch-prob"
+            oninput="chaosSend('/matoma/chaos/trig_prob',+this.value,'v-ch-prob')">
+          <div class="sv" id="v-ch-prob">0.70</div>
+        </div>
+        <div class="sr" style="--thumb:var(--c-auto)">
+          <div class="sl"><b>DÉJÀ VU</b></div>
+          <input type="range" min="0" max="1" step="0.01" value="0.00"
+            id="s-ch-dej"
+            oninput="chaosSend('/matoma/chaos/dejavu',+this.value,'v-ch-dej')">
+          <div class="sv" id="v-ch-dej">0.00</div>
+        </div>
+
+        <!-- 状態モニター（read-only） -->
+        <div class="msub" style="margin-top:.4rem">DRONE</div>
         <div class="chaos-row">
           <div class="chaos-hd">
             <span class="chaos-key">freq</span>
@@ -1068,14 +1096,42 @@ function updateTuringState(state) {
   }
 }
 
+// ── CHAOS ENGINE コントロール ──────────────────────────────
+let chaosRunning = false;
+
+function chaosToggle() {
+  const btn = document.getElementById('btn-chaos-toggle');
+  chaosRunning = !chaosRunning;
+  if (chaosRunning) {
+    btn.classList.add('on');
+    btn.textContent = 'STOP';
+    send({ address: '/matoma/chaos/start', args: [] });
+  } else {
+    btn.classList.remove('on');
+    btn.textContent = 'START';
+    send({ address: '/matoma/chaos/stop', args: [] });
+  }
+}
+
+function chaosSend(address, val, vid) {
+  document.getElementById(vid).textContent = val.toFixed(2);
+  send({ address, args: [val] });
+}
+
 // ── CHAOS STATE 可視化 ─────────────────────────────────────
 function setChaosRunning(on) {
+  chaosRunning = on;
   const body   = document.getElementById('chaos-body');
   const status = document.getElementById('chaos-status');
+  const btn    = document.getElementById('btn-chaos-toggle');
   if (body)   body.classList.toggle('chaos-running', on);
   if (status) {
     status.textContent = on ? '動作中' : '待機';
     status.style.color = on ? 'var(--c-auto)' : 'var(--dim)';
+  }
+  if (btn) {
+    btn.textContent = on ? 'STOP' : 'START';
+    on ? btn.classList.add('on') : btn.classList.remove('on');
   }
 }
 

@@ -159,7 +159,7 @@ s.waitForBoot({
             room         = 0.75,
             amp          = 0.35,
             atk          = 4.0,
-            brightness   = 0.5,
+            brightness   = 0.65,
             gate         = 1;
 
         var noise, klankedL, klankedR, klanked;

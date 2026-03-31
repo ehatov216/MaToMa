@@ -521,6 +521,24 @@ async def ws_handler(websocket) -> None:
                             f" → {attractor_val} (range={range_val})"
                         )
 
+                elif address == "/matoma/chaos/speed":
+                    # カオスの変化速度（0=ゆっくり / 1=速い）
+                    if chaos_engine is not None and args:
+                        chaos_engine.set_speed(float(args[0]))
+                        log.info(f"ChaosEngine speed: {args[0]}")
+
+                elif address == "/matoma/chaos/trig_prob":
+                    # パラメーター変化のトリガー確率（0=ほぼ変化なし / 1=常に変化）
+                    if chaos_engine is not None and args:
+                        chaos_engine.set_trig_prob(float(args[0]))
+                        log.info(f"ChaosEngine trig_prob: {args[0]}")
+
+                elif address == "/matoma/chaos/dejavu":
+                    # 過去パターンを繰り返す確率（0=常に新しい / 1=常に繰り返す）
+                    if chaos_engine is not None and args:
+                        chaos_engine.set_dejavu_prob(float(args[0]))
+                        log.info(f"ChaosEngine dejavu: {args[0]}")
+
                 elif address == "/matoma/chaos/start":
                     # カオスエンジンを開始する
                     if chaos_engine is not None:
