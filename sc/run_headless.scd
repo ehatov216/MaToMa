@@ -1368,34 +1368,19 @@ s.waitForBoot({
         "ドローン明るさ解析器 起動 (Organic Coupling)".postln;
     }.defer;
 
-    // 2c. Granular シンセ自動スタート（Drone素材をすぐ粒に変換してテクスチャを出す）
-    // Recorder が録音を開始してから 2秒後に起動する。
-    // この1行がないと GrainBuf は動くが音が一切出ない。
-    {
-        2.0.wait;
-        ~currentGranular = Synth(\matoma_granular, [
-            \buf,            ~granularRingBuf.bufnum,
-            \outBus,         ~effectBus.index,
-            \density,        12,
-            \spray,          0.4,
-            \amp,            0.4,
-            \centroidBusIdx, ~centroidBus.index,
-            \couplingBusIdx, ~couplingBus.index
-        ], addAction: \addToTail);
-        "グラニュラー自動スタート (density:12 spray:0.4)".postln;
-    }.fork;
+    // 2c. Granular 自動スタート → 無効化（起動時は無音にする）
+    // 再度有効にする場合は下の3行のコメントを外す
+    // { 2.0.wait; ~currentGranular = Synth(\matoma_granular, [\buf, ~granularRingBuf.bufnum,
+    //     \outBus, ~effectBus.index, \centroidBusIdx, ~centroidBus.index,
+    //     \couplingBusIdx, ~couplingBus.index], addAction: \addToTail); }.fork;
 
-    // 3. Turing Machine を自動スタート（prob=0.2 の控えめな確率）
-    // 音が出るのは ~effectBus 経由なので Effect パススルーが必須
-    { 0.5.wait; ~startTuringMachine.(); }.fork;
+    // 3. Turing Machine 自動スタート → 無効化（起動時は無音にする）
+    // { 0.5.wait; ~startTuringMachine.(); }.fork;
 
-    // 4. Drone を自動スタート（起動直後から音が出る）
-    // Granular Recorder の起動後に開始することで素材がすぐ録音される
-    {
-        1.0.wait;  // Granular Recorder と同期を確実にする
-        ~currentDrone = Synth(\matoma_drone, addAction: \addToHead);
-        "ドローン自動スタート (v3 自己組織化FB)".postln;
-    }.fork;
+    // 4. Drone 自動スタート → 無効化（起動時は無音にする）
+    // { 1.0.wait; ~currentDrone = Synth(\matoma_drone, addAction: \addToHead); }.fork;
+
+    "起動時自動発音: 無効（各モジュールを手動でONしてください）".postln;
 
     // ── テスト音 ────────────────────────────────────────────────────
     // 動作確認用: 880Hzのビープを0.3秒鳴らしてPythonへ通知する
@@ -1484,8 +1469,7 @@ s.waitForBoot({
     "  自動起動済み:".postln;
     "    - Effect パススルー (~effectBus → Out 0)".postln;
     "    - Granular Recorder (~droneBus → リングバッファ)".postln;
-    "    - Turing Machine (prob=0.2)".postln;
-    "    - Drone v3 自己組織化フィードバックネットワーク".postln;
+    "  ※ 起動時は無音。各モジュールを手動でONしてください。".postln;
     "".postln;
     "  Drone パラメーター範囲:".postln;
     "    freq_norm    : 0.0〜1.0 → 20〜300Hz にマップ".postln;
