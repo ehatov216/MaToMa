@@ -20,25 +20,36 @@ log = logging.getLogger(__name__)
 
 
 def _find_boot_tidal() -> Path | None:
-    """BootTidal.hs のパスを自動検出する（macOS / Linux）。"""
-    patterns = [
-        # Cabal インストール（macOS）
-        str(
-            Path.home() / ".cabal" / "share" / "*" / "tidal-*" / "BootTidal.hs"
-        ),
-        # Stack インストール
-        str(
-            Path.home() / ".stack" / "snapshots"
-            / "*" / "*" / "*" / "share" / "tidal-*" / "BootTidal.hs"
-        ),
-        # Linux / NixOS
+    """BootTidal.hs のパスを自動検出する（macOS / Linux）。
+
+    MaToMa プロジェクトの BootTidal_matoma.hs を最優先で使う。
+    SuperDirt 不要・ポート 57200 に直接 OSC を送るカスタム設定。
+    """
+    # 1. MaToMa カスタム BootTidal.hs を最優先
+    matoma_boot = Path(__file__).parent.parent / "sc" / "BootTidal_matoma.hs"
+    if matoma_boot.exists():
+        log.info(f"MaToMa BootTidal.hs 使用: {matoma_boot}")
+        return matoma_boot
+
+    # 2. Cabal インストール（tdl パッケージ含む、Tidal 1.9+）
+    cabal_patterns = [
+        str(Path.home() / ".local" / "state" / "cabal" / "store" / "*" / "tdl-*" / "share" / "BootTidal.hs"),
+        str(Path.home() / ".cabal" / "share" / "*" / "tdl-*" / "share" / "BootTidal.hs"),
+        str(Path.home() / ".cabal" / "share" / "*" / "tidal-*" / "BootTidal.hs"),
+    ]
+    # 3. Stack インストール
+    stack_patterns = [
+        str(Path.home() / ".stack" / "snapshots" / "*" / "*" / "*" / "share" / "tidal-*" / "BootTidal.hs"),
+    ]
+    # 4. Linux / NixOS
+    system_paths = [
         "/usr/share/tidal/BootTidal.hs",
         "/usr/local/share/tidal/BootTidal.hs",
     ]
-    for pattern in patterns:
+    for pattern in cabal_patterns + stack_patterns + system_paths:
         matches = glob.glob(pattern)
         if matches:
-            return Path(sorted(matches)[-1])  # 最新バージョンを使う
+            return Path(sorted(matches)[-1])
     return None
 
 
@@ -57,11 +68,7 @@ class TidalController:
         # 現在の状態（GUIへの同期用）
         self.state: dict = {
             "tempo_bpm": 120.0,
-            "root": "C",
-            "scale": "minor",
-            "chord": "minor",
-            "synth": "superpiano",
-            "octave": 4,
+            "synth": "matoma_rhythmic_klank",
             "amp": 0.5,
         }
 
@@ -139,39 +146,38 @@ class TidalController:
         log.info("Tidal停止")
 
     def _manual_setup(self) -> None:
-        """BootTidal.hs なしで手動セットアップする。"""
+        """BootTidal.hs なしで手動セットアップする（フォールバック）。
+
+        通常は sc/BootTidal_matoma.hs が使われるためここには来ない。
+        MaToMa カスタムターゲット（ポート 57200）で接続する。
+        """
         setup_lines = [
-            ":set -XOverloadedStrings",
+            ":set -fno-warn-orphans -Wno-type-defaults -XMultiParamTypeClasses -XOverloadedStrings",
             ":set prompt \"\"",
             ":set prompt-cont \"\"",
-            ":set -package tidal",
-            "import Sound.Tidal.Context",
+            "import Sound.Tidal.Boot",
         ]
         for line in setup_lines:
             self._write(line)
             time.sleep(0.3)
 
         time.sleep(0.5)
-        self._write("(cps, nudge) <- bpsUtils")
-        time.sleep(0.5)
+        # MaToMa カスタムターゲット: SuperDirt なし、ポート 57200 に直接送信
         self._write(
-            "tidal <- startTidal"
-            " (superdirtTarget {oLatency = 0.1}) defaultConfig"
+            "let matomaTarget = superdirtTarget { oName = \"MaToMa\","
+            " oAddress = \"127.0.0.1\", oPort = 57200,"
+            " oHandshake = False, oBusPort = Nothing }"
         )
+        time.sleep(0.3)
+        self._write(
+            "let matomaShape = OSC \"/matoma/rhythmic/trigger\" $ ArgList"
+            " [(\"s\", Nothing), (\"freq\", Just $ VF 440.0), (\"amp\", Just $ VF 0.5)]"
+        )
+        time.sleep(0.3)
+        self._write("tidalInst <- mkTidalWith [(matomaTarget, [matomaShape])] defaultConfig")
         time.sleep(2)
-
-        aliases = [
-            "let p = streamReplace tidal",
-            "let hush = streamHush tidal",
-            "let setcps = streamSetCPS tidal",
-            "let d1 = p 1 . (|< orbit 0)",
-            "let d2 = p 2 . (|< orbit 1)",
-            "let d3 = p 3 . (|< orbit 2)",
-            "let d4 = p 4 . (|< orbit 3)",
-        ]
-        for line in aliases:
-            self._write(line)
-            time.sleep(0.1)
+        self._write("instance Tidally where tidal = tidalInst")
+        time.sleep(0.3)
 
     def _read_output(self) -> None:
         """GHCiの出力をバックグラウンドで読み捨てる（ブロック防止）。"""

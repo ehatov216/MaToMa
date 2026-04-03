@@ -26,12 +26,7 @@ from typing import TYPE_CHECKING, Awaitable, Callable
 if TYPE_CHECKING:
     from tidal_controller import TidalController
 
-from tidal_patterns import (
-    ARP_RHYTHMS,
-    PROGRESSIONS,
-    make_chord_pattern,
-    make_scale_pattern,
-)
+from tidal_patterns import PRESETS, get_preset
 
 # ── パラメーター定義 ────────────────────────────────────────────────
 # key        : 内部キー名（ブラウザ・bridge から参照する名前）
@@ -132,10 +127,9 @@ class AutonomousMode:
         # ── Tidal 自律制御 ──────────────────────────────────────────────
         self._tidal: TidalController | None = None
         self._tidal_auto: bool = False
-        self._progression_name: str = "ambient_minor"
-        self._chord_step: int = 0
-        self._arp_rhythm_index: int = 0
-        # シンセtickをN回消費するごとにコードを1ステップ進める
+        # プリセットをN tick ごとに1ステップ自動送信するサイクル
+        self._preset_cycle: list[str] = list(PRESETS.keys())
+        self._preset_index: int = 0
         self._tidal_counter: int = 0
         self._tidal_change_interval: int = 4
 
@@ -190,10 +184,10 @@ class AutonomousMode:
         self._dejavu_len = max(1, min(32, int(length)))
 
     def set_progression(self, name: str) -> None:
-        """コード進行プリセットを変更する。先頭から再スタートする。"""
-        if name in PROGRESSIONS:
-            self._progression_name = name
-            self._chord_step = 0
+        """自律プリセットを固定する（旧コード進行変更と同じWSアドレスを流用）。"""
+        if name in PRESETS:
+            self._preset_cycle = [name]
+            self._preset_index = 0
             self._tidal_counter = 0
 
     def sync_current(self, param: str, value: float) -> None:
@@ -253,47 +247,26 @@ class AutonomousMode:
             await self._tidal_tick()
 
     async def _tidal_tick(self) -> None:
-        """コード進行を1ステップ進め、アルペジオパターンを更新する。"""
+        """プリセットを1ステップ進め、TidalCycles へ送る。"""
         if not self._tidal_auto or self._tidal is None:
             return
         if not self._tidal.is_running:
             return
 
-        progression = PROGRESSIONS.get(
-            self._progression_name, PROGRESSIONS["ambient_minor"]
-        )
-        self._chord_step = (self._chord_step + 1) % len(progression)
-        root, chord = progression[self._chord_step]
-
-        synth = self._tidal.state.get("synth", "superpiano")
-        octave = int(self._tidal.state.get("octave", 4))
-        amp = float(self._tidal.state.get("amp", 0.5))
-
-        # コードを鳴らす（d1）
-        chord_code = make_chord_pattern(
-            1, synth, root, chord, octave, amp * 0.8
-        )
-        self._tidal.evaluate(chord_code)
-
-        # アルペジオ（d2）: randomモードならリズムも変える
         if self._mode == "random":
-            self._arp_rhythm_index = random.randrange(  # noqa: S311
-                len(ARP_RHYTHMS)
-            )
-        degrees = ARP_RHYTHMS[self._arp_rhythm_index]
-        scale = self._tidal.state.get("scale", "minor")
-        arp_code = make_scale_pattern(
-            2, synth, root, scale, degrees, octave, amp * 0.5
-        )
-        self._tidal.evaluate(arp_code)
+            self._preset_index = random.randrange(len(self._preset_cycle))  # noqa: S311
+        else:
+            self._preset_index = (self._preset_index + 1) % len(self._preset_cycle)
 
-        # ブラウザへ現在のコードステップを通知する
+        name = self._preset_cycle[self._preset_index]
+        codes = get_preset(name)
+        for code in codes:
+            self._tidal.evaluate(code)
+
         await self._broadcast({
             "type": "tidal_auto_step",
-            "root": root,
-            "chord": chord,
-            "progression": self._progression_name,
-            "step": self._chord_step,
+            "preset": name,
+            "step": self._preset_index,
         })
 
     def _next_value(self, p: _ParamState, key: str) -> float:

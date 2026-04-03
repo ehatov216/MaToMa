@@ -39,7 +39,7 @@ from param_mapper import (
 from scenes import get_scene, scene_to_osc_messages
 from sequencer import TuringSequencer
 from tidal_controller import TidalController
-from tidal_patterns import make_chord_pattern, make_arp_pattern, make_drum_pattern
+from tidal_patterns import get_preset, PRESETS
 from turing_gene import TuringGene
 
 
@@ -729,61 +729,22 @@ async def _handle_tidal(address: str, args: list, websocket) -> None:
         tidal.state["tempo_bpm"] = bpm
         await broadcast({"type": "tidal_state", "state": tidal.state})
 
-    elif sub == "chord":
-        # args: [root, chord_type, synth, track, octave, amp]
-        root = args[0] if len(args) > 0 else tidal.state["root"]
-        chord = args[1] if len(args) > 1 else tidal.state["chord"]
-        synth = args[2] if len(args) > 2 else tidal.state["synth"]
-        track = int(args[3]) if len(args) > 3 else 1
-        octave = int(args[4]) if len(args) > 4 else tidal.state["octave"]
-        amp = float(args[5]) if len(args) > 5 else tidal.state["amp"]
-        tidal.state.update({"root": root, "chord": chord, "synth": synth})
-        code = make_chord_pattern(track, synth, root, chord, octave, amp)
-        tidal.evaluate(code)
-        await broadcast(
-            {"type": "tidal_state", "state": tidal.state, "code": code}
-        )
-
-    elif sub == "scale":
-        # args: [root, scale, synth, track, octave, amp]
-        root = args[0] if len(args) > 0 else tidal.state["root"]
-        scale = args[1] if len(args) > 1 else tidal.state["scale"]
-        synth = args[2] if len(args) > 2 else tidal.state["synth"]
-        track = int(args[3]) if len(args) > 3 else 2
-        octave = int(args[4]) if len(args) > 4 else tidal.state["octave"]
-        amp = float(args[5]) if len(args) > 5 else tidal.state["amp"]
-        tidal.state.update({"root": root, "scale": scale, "synth": synth})
-        code = make_arp_pattern(track, synth, root, scale, 8, octave, amp)
-        tidal.evaluate(code)
-        await broadcast(
-            {"type": "tidal_state", "state": tidal.state, "code": code}
-        )
+    elif sub == "preset":
+        # args: [preset_name]  例: "alva_euclidean", "opn_sparse" など
+        preset_name = str(args[0]) if args else "minimal_klank"
+        codes = get_preset(preset_name)
+        for code in codes:
+            tidal.evaluate(code)
+        combined = "\n".join(codes)
+        tidal.state["preset"] = preset_name
+        log.info(f"Tidalプリセット送信: {preset_name}")
+        await broadcast({"type": "tidal_applied", "preset": preset_name, "code": combined})
 
     elif sub == "state":
         # 現在の状態を返す
         await websocket.send(
             json.dumps({"type": "tidal_state", "state": tidal.state})
         )
-
-    elif sub == "drums":
-        # args: [preset, kick_gain, snare_gain, hat_gain, speed]
-        preset     = str(args[0]) if len(args) > 0 else "minimal"
-        kick_gain  = float(args[1]) if len(args) > 1 else 0.9
-        snare_gain = float(args[2]) if len(args) > 2 else 0.7
-        hat_gain   = float(args[3]) if len(args) > 3 else 0.5
-        speed      = float(args[4]) if len(args) > 4 else 1.0
-        codes = make_drum_pattern(3, 4, 5, preset, kick_gain, snare_gain, hat_gain, speed)
-        for code in codes:
-            tidal.evaluate(code)
-        combined = "\n".join(codes)
-        log.info(f"ドラムパターン送信: {preset}")
-        await broadcast({"type": "tidal_applied", "code": combined})
-
-    elif sub == "drums_stop":
-        # ドラムトラック (d3, d4, d5) を停止
-        for track in [3, 4, 5]:
-            tidal.evaluate(f"d{track} $ silence")
-        await broadcast({"type": "tidal_applied", "code": "d3..d5 silence"})
 
 
 async def _handle_seq(address: str, args: list, websocket) -> None:

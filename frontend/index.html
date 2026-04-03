@@ -11,7 +11,7 @@
   --c-scene:#4ade80;--c-drone:#60a5fa;--c-gran:#fb923c;
   --c-rhythmic:#f43f5e;--c-auto:#a78bfa;--c-warn:#fbbf24;
   --c-drop:#f472b6;--c-energy:#fbbf24;--c-turing:#818cf8;
-  --c-glitch:#ff4466;
+  --c-glitch:#ff4466;--c-tidal:#2dd4bf;
 }
 body{background:var(--bg);color:var(--text);
   font-family:'SF Mono','Fira Code',monospace;font-size:12px;min-height:100vh}
@@ -193,6 +193,21 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
 .perc-ss-btn:hover{background:var(--bg3);color:var(--text)}
 .perc-ss-btn.on{border-color:var(--c-rhythmic);color:var(--c-rhythmic);background:#150a0d;
   box-shadow:0 0 8px rgba(244,63,94,.15)}
+
+/* ── TIDAL ── */
+.tidal-ss-btn{flex:1;padding:.32rem .25rem;font-family:inherit;font-size:.65rem;
+  border-radius:3px;border:1px solid var(--border);background:transparent;
+  color:var(--dim);cursor:pointer;transition:all .12s;text-align:center}
+.tidal-ss-btn:hover{background:var(--bg3);color:var(--text)}
+.tidal-ss-btn.on{border-color:var(--c-tidal);color:var(--c-tidal);background:#051a18;
+  box-shadow:0 0 8px rgba(45,212,191,.15)}
+.tidal-presets{display:flex;flex-direction:column;gap:.22rem;margin-bottom:.3rem}
+.tidal-preset-btn{width:100%;padding:.3rem .4rem;font-family:inherit;font-size:.62rem;
+  border-radius:3px;border:1px solid var(--border);background:transparent;
+  color:var(--dim);cursor:pointer;transition:all .12s;text-align:left;letter-spacing:.04em}
+.tidal-preset-btn:hover{background:var(--bg3);color:var(--text)}
+.tidal-preset-btn.on{border-color:var(--c-tidal);color:var(--c-tidal);background:#051a18;
+  box-shadow:0 0 8px rgba(45,212,191,.12)}
 
 /* ── LOG ── */
 #log-panel{background:var(--bg2);border:1px solid var(--border);
@@ -887,6 +902,33 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
 
       </div>
     </div>
+
+    <!-- TIDAL -->
+    <div class="mod" id="tidal-panel">
+      <div class="mhdr">
+        <div class="mbar" style="background:var(--c-tidal)"></div>
+        <div class="mname">TIDAL</div>
+        <span id="tidal-status" style="font-size:.57rem;color:var(--dim);margin-left:.3rem">停止</span>
+      </div>
+      <div class="mbody">
+        <div class="perc-start-stop">
+          <button class="tidal-ss-btn" id="btn-tidal-toggle" onclick="tidalToggle()">▶ START</button>
+          <button class="tidal-ss-btn" id="btn-tidal-hush" onclick="tidalHush()"
+            style="color:var(--c-warn);border-color:var(--dim)">HUSH</button>
+        </div>
+        <div class="msub">PRESET</div>
+        <div class="tidal-presets">
+          <button class="tidal-preset-btn" id="tp-minimal_klank" onclick="tidalPreset('minimal_klank')">minimal_klank</button>
+          <button class="tidal-preset-btn" id="tp-alva_euclidean" onclick="tidalPreset('alva_euclidean')">alva_euclidean</button>
+          <button class="tidal-preset-btn" id="tp-alva_phase" onclick="tidalPreset('alva_phase')">alva_phase</button>
+          <button class="tidal-preset-btn" id="tp-opn_sparse" onclick="tidalPreset('opn_sparse')">opn_sparse</button>
+          <button class="tidal-preset-btn" id="tp-chaos_collapse" onclick="tidalPreset('chaos_collapse')">chaos_collapse</button>
+        </div>
+        <div style="font-size:.57rem;color:var(--dim);margin-top:.2rem">
+          preset: <span id="tidal-current-preset" style="color:var(--c-tidal)">—</span>
+        </div>
+      </div>
+    </div>
   </div><!-- #right-col2 -->
 
   <!-- LOG (span all columns) -->
@@ -980,6 +1022,11 @@ function handleMessage(m) {
     document.getElementById('v-gsamp-file').textContent = '⚠ ' + m.message;
     addLog('/gran_sampler', 'error: ' + m.message);
   }
+  else if (t === 'tidal_started')  { setTidalRunning(true);  addLog('/tidal', 'started'); }
+  else if (t === 'tidal_stopped')  { setTidalRunning(false); addLog('/tidal', 'stopped'); }
+  else if (t === 'tidal_error')    { addLog('/tidal/err', m.message || ''); }
+  else if (t === 'tidal_applied')  { tidalPresetApplied(m.preset); addLog('/tidal', 'applied: ' + (m.preset || '')); }
+  else if (t === 'tidal_state')    { if (m.state) { setTidalRunning(!!m.state.running); if (m.state.preset) tidalPresetApplied(m.state.preset); } }
   else { addLog(t || m.address || '?', JSON.stringify(m.args || m.params || {})); }
 }
 
@@ -1416,6 +1463,55 @@ function percWeights() {
   document.getElementById('v-perc-w-hihat').textContent = h.toFixed(2);
   document.getElementById('v-perc-w-clap').textContent  = c.toFixed(2);
   send({ address: '/matoma/perc/chaos/weights', args: [k, s, h, c] });
+}
+
+// ── TIDAL ─────────────────────────────────────────────────
+let tidalRunning = false;
+const TIDAL_PRESETS = ['minimal_klank','alva_euclidean','alva_phase','opn_sparse','chaos_collapse'];
+
+function tidalToggle() {
+  tidalRunning = !tidalRunning;
+  if (tidalRunning) {
+    send({ address: '/matoma/tidal/start', args: [] });
+    addLog('/tidal', 'start');
+  } else {
+    send({ address: '/matoma/tidal/stop', args: [] });
+    addLog('/tidal', 'stop');
+  }
+  setTidalRunning(tidalRunning);
+}
+
+function tidalHush() {
+  send({ address: '/matoma/tidal/hush', args: [] });
+  addLog('/tidal', 'hush');
+}
+
+function tidalPreset(name) {
+  send({ address: '/matoma/tidal/preset', args: [name] });
+  tidalPresetApplied(name);
+  addLog('/tidal/preset', name);
+}
+
+function tidalPresetApplied(name) {
+  TIDAL_PRESETS.forEach(p => {
+    const b = document.getElementById('tp-' + p);
+    if (b) b.classList.toggle('on', p === name);
+  });
+  const cur = document.getElementById('tidal-current-preset');
+  if (cur) cur.textContent = name || '—';
+}
+
+function setTidalRunning(on) {
+  tidalRunning = on;
+  const btn = document.getElementById('btn-tidal-toggle');
+  const st  = document.getElementById('tidal-status');
+  if (on) {
+    if (btn) { btn.classList.add('on'); btn.textContent = '■ STOP'; }
+    if (st)  { st.textContent = '動作中'; st.style.color = 'var(--c-tidal)'; }
+  } else {
+    if (btn) { btn.classList.remove('on'); btn.textContent = '▶ START'; }
+    if (st)  { st.textContent = '停止'; st.style.color = 'var(--dim)'; }
+  }
 }
 
 // ── キーボードショートカット ──────────────────────────────
