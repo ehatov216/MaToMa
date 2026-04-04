@@ -18,6 +18,7 @@ ChaosEngine:
 """
 
 import asyncio
+import logging
 import random
 from collections import deque
 from dataclasses import dataclass
@@ -26,7 +27,18 @@ from typing import TYPE_CHECKING, Awaitable, Callable
 if TYPE_CHECKING:
     from tidal_controller import TidalController
 
+from randomize_models import (
+    BoundedWalkModel,
+    DejavuModel,
+    DynamicBlendLower,
+    DynamicBlendMiddle,
+    RandomizeModel,
+    make_lower_model,
+    make_middle_model,
+)
 from tidal_patterns import PRESETS, get_preset
+
+logger = logging.getLogger(__name__)
 
 # ── パラメーター定義 ────────────────────────────────────────────────
 # key        : 内部キー名（ブラウザ・bridge から参照する名前）
@@ -392,12 +404,23 @@ _DEFAULT_CHAOS_PARAMS: dict[str, _LayerParams] = {
         "pos":     (0.5,   0.5,   0.4,   0.10),
         "room":    (0.5,   0.5,   0.25,  0.05),
     },
-    "rhythmic": {
-        # prob: Turing Machine の変異量が1〜2分かけて緩やかに変化
-        "prob": (0.3,  0.3,  0.3,  0.06),
+    "gran_synth": {
+        # GrainSin ベースグラニュラーシンセ（バッファ不要）
+        "density":  (35.0, 35.0, 15.0, 0.20),
+        "grainDur": (0.18, 0.18, 0.12, 0.05),
+        "bright":   (0.4,  0.4,  0.3,  0.08),
+        "chaos":    (0.3,  0.3,  0.25, 0.06),
+        "room":     (0.6,  0.6,  0.25, 0.05),
+        "amp":      (0.4,  0.4,  0.08, 0.02),
     },
-    # gran_synth は FLUTE スライダーで手動制御するため ChaosEngine から除外
-    # （自動変調が 10回/秒で手動操作を上書きするため操作性が損なわれる）
+    "gran_sampler": {
+        # ファイル読み込み型グラニュラーサンプラー
+        "pos":      (0.5,  0.5,  0.4,  0.10),
+        "density":  (20.0, 20.0, 12.0, 0.18),
+        "spray":    (0.3,  0.3,  0.25, 0.08),
+        "room":     (0.4,  0.4,  0.25, 0.05),
+        "amp":      (0.5,  0.5,  0.08, 0.02),
+    },
 }
 
 
@@ -418,7 +441,7 @@ class ChaosEngine:
     """
 
     HISTORY_LEN = 8        # 各パラメーターが記憶する世代数
-    DEJAVU_PROB = 0.3      # 過去に戻る確率
+    DEJAVU_PROB = 0.3      # 過去に戻る確率（DejavuModel デフォルト）
     UPDATE_INTERVAL = 0.1  # 更新間隔（秒）
 
     def __init__(
@@ -442,13 +465,19 @@ class ChaosEngine:
             for layer, params in _DEFAULT_CHAOS_PARAMS.items()
         }
 
-        # Dejavu 履歴: {param_path: deque(maxlen=HISTORY_LEN)}
-        # param_path は "drone/freq" のような形式
+        # 履歴: {param_path: deque(maxlen=HISTORY_LEN)}
+        # param_path は "drone/shimmer" のような形式
         self._history: dict[str, deque[float]] = {
             f"{layer}/{param}": deque(maxlen=self.HISTORY_LEN)
             for layer, params in _DEFAULT_CHAOS_PARAMS.items()
             for param in params
         }
+
+        # ランダマイズモデル（中位・下位レイヤー）
+        self._middle_model: RandomizeModel = BoundedWalkModel()
+        self._lower_model: RandomizeModel = DejavuModel(snap_prob=self.DEJAVU_PROB)
+        # 下位モデルの適用ウェイト: 0.0=中位のみ, 1.0=下位のみ（デフォルト）
+        self._lower_weight: float = 1.0
 
     # ── 外部API ──────────────────────────────────────────────────────────
 
@@ -485,6 +514,65 @@ class ChaosEngine:
             p = self._params[layer][param]
             self._params[layer][param] = p.with_attractor(attractor, range_val)
 
+    def set_speed(self, speed: float) -> None:
+        """全パラメーターの speed を一括変更する（0.0〜2.0 推奨）。"""
+        speed = max(0.0, float(speed))
+        for layer in self._params:
+            for param, p in self._params[layer].items():
+                self._params[layer][param] = _ChaosParam(
+                    value=p.value, attractor=p.attractor, range=p.range, speed=speed
+                )
+        logger.debug("[ChaosEngine] speed → %.2f", speed)
+
+    def set_dejavu_prob(self, prob: float) -> None:
+        """DejavuModel の snap_prob を設定する（0.0〜1.0）。"""
+        prob = max(0.0, min(1.0, float(prob)))
+        if hasattr(self._lower_model, "set_snap_prob"):
+            self._lower_model.set_snap_prob(prob)
+        logger.debug("[ChaosEngine] dejavu_prob → %.2f", prob)
+
+    def set_middle_model(self, name: str) -> None:
+        """中位レイヤーのランダマイズモデルを切り替える。
+
+        Args:
+            name: "bounded_walk" | "fractal" | "lsystem" | "blend"
+        """
+        self._middle_model = make_middle_model(name)
+        logger.info("[ChaosEngine] middle_model → %s", name)
+
+    def set_lower_model(self, name: str) -> None:
+        """下位レイヤーのランダマイズモデルを切り替える。
+
+        Args:
+            name: "dejavu" | "bounded_walk" | "lsystem" | "blend"
+        """
+        self._lower_model = make_lower_model(name)
+        logger.info("[ChaosEngine] lower_model → %s", name)
+
+    def set_lower_weight(self, weight: float) -> None:
+        """下位モデルの適用ウェイトを設定する（0.0=中位のみ, 1.0=下位のみ）。"""
+        self._lower_weight = max(0.0, min(1.0, float(weight)))
+
+    def set_lower_chaos(self, ratio: float) -> None:
+        """下位レイヤーの反復↔カオス比率を設定する（0.0=繰り返し, 1.0=カオス）。
+
+        DynamicBlendLower がアクティブな場合のみ有効。
+        """
+        ratio = max(0.0, min(1.0, float(ratio)))
+        if hasattr(self._lower_model, "set_ratio"):
+            self._lower_model.set_ratio(ratio)
+        logger.debug("[ChaosEngine] lower_chaos → %.2f", ratio)
+
+    def set_middle_chaos(self, ratio: float) -> None:
+        """中位レイヤーの反復↔カオス比率を設定する（0.0=繰り返し, 1.0=カオス）。
+
+        DynamicBlendMiddle がアクティブな場合のみ有効。
+        """
+        ratio = max(0.0, min(1.0, float(ratio)))
+        if hasattr(self._middle_model, "set_ratio"):
+            self._middle_model.set_ratio(ratio)
+        logger.debug("[ChaosEngine] middle_chaos → %.2f", ratio)
+
     def set_scene(self, scene: dict) -> None:
         """シーン定義（引力点と揺れ幅）に合わせてパラメーターを更新する。
 
@@ -493,7 +581,6 @@ class ChaosEngine:
         """
         drone = scene.get("drone", {})
         granular = scene.get("granular", {})
-        rhythmic = scene.get("rhythmic", {})
 
         # Drone パラメーター
         self._params["drone"] = self._apply_scene_layer(
@@ -519,17 +606,6 @@ class ChaosEngine:
                 ),
                 "spray": (granular.get("spray_attractor"), None),
                 "room": (granular.get("room_attractor"), None),
-            },
-        )
-
-        # Rhythmic パラメーター
-        self._params["rhythmic"] = self._apply_scene_layer(
-            self._params["rhythmic"],
-            {
-                "prob": (
-                    rhythmic.get("prob_attractor"),
-                    rhythmic.get("prob_range"),
-                ),
             },
         )
 
@@ -572,28 +648,22 @@ class ChaosEngine:
         return result
 
     def _next_value(self, path: str, p: _ChaosParam) -> float:
-        """Dejavu + Bounded Random Walk で次の値を計算する（イミュータブル）。
+        """中位モデル + 下位モデルを重ね合わせて次の値を計算する（イミュータブル）。
 
-        - 確率 DEJAVU_PROB: 過去のある世代の値に戻る
-        - それ以外: 引力点に引き寄せられながら小さくランダムに動く
+        result = middle_val * (1 - lower_weight) + lower_val * lower_weight
+        lower_weight=1.0（デフォルト）のとき下位モデル（Dejavu）のみ使用 → 従来動作。
         """
         history = self._history[path]
-
-        # Dejavu: 履歴があれば確率的に過去の値を使う
-        if history and random.random() < self.DEJAVU_PROB:  # noqa: S311
-            return random.choice(list(history))  # noqa: S311
-
-        # Bounded Random Walk: 引力点方向への引力 + ランダム摂動
-        # 引力: 現在値が引力点から離れるほど引き寄せる力が強くなる
-        # 0.1 に引き上げることで確率的ランダムウォークから真の引力中心への収束へ
-        attraction = (p.attractor - p.value) * 0.1
-        perturbation = (  # noqa: S311
-            p.range * p.speed * (random.random() * 2.0 - 1.0)
+        args = (
+            p.value, p.attractor, p.floor, p.ceiling, p.range, p.speed, history
         )
-        new_val = p.value + attraction + perturbation
-
-        # 境界でクランプ（引力点 ± range）
-        return max(p.floor, min(p.ceiling, new_val))
+        if self._lower_weight <= 0.0:
+            return self._middle_model.next_value(*args)
+        if self._lower_weight >= 1.0:
+            return self._lower_model.next_value(*args)
+        middle_val = self._middle_model.next_value(*args)
+        lower_val = self._lower_model.next_value(*args)
+        return middle_val * (1.0 - self._lower_weight) + lower_val * self._lower_weight
 
     async def _loop(self) -> None:
         """UPDATE_INTERVAL ごとに全パラメーターを更新し続けるループ。"""

@@ -29,6 +29,7 @@ from pythonosc.osc_server import AsyncIOOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
 
 from autonomous import AutonomousMode, ChaosEngine
+from markov_timescale import MarkovTimescale
 from param_mapper import (
     chaos_to_internal,
     density_to_internal,
@@ -180,6 +181,9 @@ sequencer: Optional[TuringSequencer] = None
 
 # Layer B: チューリング遷伝子（シフトレジスタ変异型Pitchシーケンサー）
 turing_gene: Optional[TuringGene] = None
+
+# Markov タイムスケール（上位層, 256s+）
+markov: Optional[MarkovTimescale] = None
 
 # SC プロセス
 sc_process = None
@@ -488,6 +492,8 @@ async def ws_handler(websocket) -> None:
                         })
 
                 elif address == "/matoma/all/stop":
+                    if markov is not None:
+                        markov.stop()
                     if chaos_engine is not None:
                         chaos_engine.stop()
                     if autonomous is not None:
@@ -527,12 +533,6 @@ async def ws_handler(websocket) -> None:
                         chaos_engine.set_speed(float(args[0]))
                         log.info(f"ChaosEngine speed: {args[0]}")
 
-                elif address == "/matoma/chaos/trig_prob":
-                    # パラメーター変化のトリガー確率（0=ほぼ変化なし / 1=常に変化）
-                    if chaos_engine is not None and args:
-                        chaos_engine.set_trig_prob(float(args[0]))
-                        log.info(f"ChaosEngine trig_prob: {args[0]}")
-
                 elif address == "/matoma/chaos/dejavu":
                     # 過去パターンを繰り返す確率（0=常に新しい / 1=常に繰り返す）
                     if chaos_engine is not None and args:
@@ -552,6 +552,53 @@ async def ws_handler(websocket) -> None:
                         chaos_engine.stop()
                     log.info("ChaosEngine 停止")
                     await broadcast({"type": "chaos_stopped"})
+
+                # ── Markov タイムスケール ──────────────────────────────────
+                elif address == "/matoma/markov/start":
+                    if markov is not None:
+                        markov.start()
+                        await broadcast({"type": "markov_state", "state": markov.get_state()})
+                    log.info("Markov 開始")
+
+                elif address == "/matoma/markov/stop":
+                    if markov is not None:
+                        markov.stop()
+                        await broadcast({"type": "markov_state", "state": markov.get_state()})
+                    log.info("Markov 停止")
+
+                elif address == "/matoma/markov/interval":
+                    if markov is not None and args:
+                        markov.set_interval(float(args[0]))
+                        await broadcast({"type": "markov_state", "state": markov.get_state()})
+                    log.info(f"Markov interval: {args[0] if args else '?'}")
+
+                elif address == "/matoma/markov/state":
+                    # フロントエンドからのポーリング
+                    if markov is not None:
+                        await broadcast({"type": "markov_state", "state": markov.get_state()})
+
+                # ── レイヤーモデル選択 ────────────────────────────────────
+                elif address == "/matoma/layer/middle/model":
+                    if chaos_engine is not None and args:
+                        chaos_engine.set_middle_model(str(args[0]))
+                        log.info(f"middle model → {args[0]}")
+
+                elif address == "/matoma/layer/lower/model":
+                    if chaos_engine is not None and args:
+                        chaos_engine.set_lower_model(str(args[0]))
+                        log.info(f"lower model → {args[0]}")
+
+                elif address == "/matoma/layer/middle/chaos":
+                    # 中位レイヤーの反復↔カオス比率（0.0=繰り返し, 1.0=カオス）
+                    if chaos_engine is not None and args:
+                        chaos_engine.set_middle_chaos(float(args[0]))
+                        log.info(f"middle chaos ratio → {args[0]}")
+
+                elif address == "/matoma/layer/lower/chaos":
+                    # 下位レイヤーの反復↔カオス比率（0.0=繰り返し, 1.0=カオス）
+                    if chaos_engine is not None and args:
+                        chaos_engine.set_lower_chaos(float(args[0]))
+                        log.info(f"lower chaos ratio → {args[0]}")
 
                 elif address.startswith("/matoma/autonomous/"):
                     # 自律モードの制御
@@ -1014,7 +1061,7 @@ def _release_pid_lock() -> None:
 
 async def main() -> None:
     """OSCサーバーとWebSocketサーバーを同時に起動する。"""
-    global autonomous, chaos_engine, tidal, sequencer, turing_gene
+    global autonomous, chaos_engine, tidal, sequencer, turing_gene, markov
 
     _acquire_pid_lock()
     await asyncio.sleep(0.8)  # 旧プロセスの終了を待つ（イベントループをブロックしない）
@@ -1025,6 +1072,7 @@ async def main() -> None:
     autonomous.set_tidal(tidal)
     sequencer = TuringSequencer(sc_client.send_message, broadcast)
     turing_gene = TuringGene(sc_client.send_message, broadcast)
+    markov = MarkovTimescale(chaos_engine, broadcast, tidal_controller=tidal)
 
     disp = Dispatcher()
     disp.set_default_handler(on_osc_message)

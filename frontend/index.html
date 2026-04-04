@@ -124,8 +124,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
 .chaos-bar-wrap{position:relative;height:4px;background:var(--bg3);
   border-radius:2px;border:1px solid var(--border)}
 .chaos-bar{height:100%;border-radius:2px;transition:width .4s ease;position:relative;z-index:2}
-.chaos-bar.drone  {background:var(--c-drone)}
-.chaos-bar.granular{background:var(--c-gran)}
+.chaos-bar.drone      {background:var(--c-drone)}
+.chaos-bar.granular   {background:var(--c-gran)}
+.chaos-bar.gran-synth {background:var(--c-gran)}
+.chaos-bar.gran-sampler{background:#2dd4bf}
 .chaos-attractor{position:absolute;top:-1px;width:2px;height:calc(100% + 2px);
   background:#fff;opacity:.5;border-radius:1px;
   transition:left .5s ease;z-index:3;pointer-events:none}
@@ -208,6 +210,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
 .tidal-preset-btn:hover{background:var(--bg3);color:var(--text)}
 .tidal-preset-btn.on{border-color:var(--c-tidal);color:var(--c-tidal);background:#051a18;
   box-shadow:0 0 8px rgba(45,212,191,.12)}
+
+/* ── TIMESCALE ── */
+.radio-group{display:flex;flex-direction:column;gap:.18rem;margin-top:.2rem}
+.radio-group label{font-size:.62rem;color:var(--dim);display:flex;align-items:center;gap:.3rem;cursor:pointer}
+.radio-group label:hover{color:var(--text)}
+.radio-group input[type=radio]{accent-color:#9b59b6;cursor:pointer}
 
 /* ── LOG ── */
 #log-panel{background:var(--bg2);border:1px solid var(--border);
@@ -738,24 +746,86 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
         </div>
         <div class="sr" style="--thumb:var(--c-auto)">
           <div class="sl"><b>SPEED</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.30"
-            id="s-ch-spd"
-            oninput="chaosSend('/matoma/chaos/speed',+this.value,'v-ch-spd')">
-          <div class="sv" id="v-ch-spd">0.30</div>
+          <div style="flex:1;position:relative;height:4px;background:var(--border);border-radius:2px;margin:0 4px">
+            <div id="cb-ch-spd" style="position:absolute;left:0;top:0;height:100%;width:15%;background:var(--c-auto);border-radius:2px;transition:width .6s ease"></div>
+          </div>
+          <div class="sv" id="v-ch-spd">—</div>
         </div>
         <div class="sr" style="--thumb:var(--c-auto)">
           <div class="sl"><b>PROB</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.70"
-            id="s-ch-prob"
-            oninput="chaosSend('/matoma/chaos/trig_prob',+this.value,'v-ch-prob')">
-          <div class="sv" id="v-ch-prob">0.70</div>
+          <div style="flex:1;position:relative;height:4px;background:var(--border);border-radius:2px;margin:0 4px">
+            <div id="cb-ch-prob" style="position:absolute;left:0;top:0;height:100%;width:30%;background:var(--c-auto);border-radius:2px;transition:width .6s ease"></div>
+          </div>
+          <div class="sv" id="v-ch-prob">—</div>
         </div>
         <div class="sr" style="--thumb:var(--c-auto)">
-          <div class="sl"><b>DÉJÀ VU</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.00"
-            id="s-ch-dej"
-            oninput="chaosSend('/matoma/chaos/dejavu',+this.value,'v-ch-dej')">
-          <div class="sv" id="v-ch-dej">0.00</div>
+          <div class="sl"><b>REPEAT</b></div>
+          <div style="flex:1;position:relative;height:4px;background:var(--border);border-radius:2px;margin:0 4px">
+            <div id="cb-ch-dej" style="position:absolute;left:0;top:0;height:100%;width:0%;background:var(--c-auto);border-radius:2px;transition:width .6s ease"></div>
+          </div>
+          <div class="sv" id="v-ch-dej">—</div>
+        </div>
+
+        <!-- ドリフトモデル -->
+        <div class="msub" style="margin-top:.5rem">DRIFT MODEL</div>
+        <div style="display:flex;gap:8px">
+          <div style="flex:1">
+            <div style="font-size:.55rem;color:var(--dim);margin-bottom:.15rem">MIDDLE</div>
+            <div class="radio-group" id="middle-model-group">
+              <label><input type="radio" name="middle-model" value="bounded_walk" checked
+                onchange="send({address:'/matoma/layer/middle/model',args:['bounded_walk']})"> BoundedWalk</label>
+              <label><input type="radio" name="middle-model" value="fractal"
+                onchange="send({address:'/matoma/layer/middle/model',args:['fractal']})"> Fractal</label>
+              <label><input type="radio" name="middle-model" value="lsystem"
+                onchange="send({address:'/matoma/layer/middle/model',args:['lsystem']})"> L-System</label>
+              <label><input type="radio" name="middle-model" value="blend"
+                onchange="send({address:'/matoma/layer/middle/model',args:['blend']})"> Blend</label>
+            </div>
+          </div>
+          <div style="flex:1">
+            <div style="font-size:.55rem;color:var(--dim);margin-bottom:.15rem">LOWER</div>
+            <div class="radio-group" id="lower-model-group">
+              <label><input type="radio" name="lower-model" value="dejavu" checked
+                onchange="send({address:'/matoma/layer/lower/model',args:['dejavu']})"> Dejavu</label>
+              <label><input type="radio" name="lower-model" value="bounded_walk"
+                onchange="send({address:'/matoma/layer/lower/model',args:['bounded_walk']})"> BoundedWalk</label>
+              <label><input type="radio" name="lower-model" value="lsystem"
+                onchange="send({address:'/matoma/layer/lower/model',args:['lsystem']})"> L-System</label>
+              <label><input type="radio" name="lower-model" value="blend"
+                onchange="send({address:'/matoma/layer/lower/model',args:['blend']})"> Blend</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 反復↔カオス スライダー -->
+        <div class="ctrl-row" style="margin-top:.4rem">
+          <label class="ctrl-lbl" style="font-size:.52rem">MIDDLE<br>REPEAT↔CHAOS</label>
+          <input type="range" id="middle-chaos" min="0" max="1" value="0.5" step="0.01"
+            oninput="send({address:'/matoma/layer/middle/chaos',args:[+this.value]});document.getElementById('v-mid-chaos').textContent=parseFloat(this.value).toFixed(2)">
+          <span id="v-mid-chaos" class="ctrl-val">0.50</span>
+        </div>
+        <div class="ctrl-row">
+          <label class="ctrl-lbl" style="font-size:.52rem">LOWER<br>REPEAT↔CHAOS</label>
+          <input type="range" id="lower-chaos" min="0" max="1" value="0.5" step="0.01"
+            oninput="send({address:'/matoma/layer/lower/chaos',args:[+this.value]});document.getElementById('v-low-chaos').textContent=parseFloat(this.value).toFixed(2)">
+          <span id="v-low-chaos" class="ctrl-val">0.50</span>
+        </div>
+
+        <!-- Markov -->
+        <div class="msub" style="margin-top:.5rem">MARKOV</div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:.3rem">
+          <button class="tidal-ss-btn" id="btn-markov-toggle" onclick="markovToggle()">▶ MARKOV</button>
+          <span id="markov-status" style="font-size:.57rem;color:var(--dim)">停止</span>
+        </div>
+        <div class="ctrl-row">
+          <label class="ctrl-lbl">INTERVAL</label>
+          <input type="range" id="markov-interval" min="10" max="300" value="60" step="5"
+            oninput="send({address:'/matoma/markov/interval',args:[+this.value]});document.getElementById('markov-interval-val').textContent=this.value+'s'">
+          <span id="markov-interval-val" class="ctrl-val">60s</span>
+        </div>
+        <div style="font-size:.57rem;color:var(--dim);margin-top:.2rem">
+          状態: <span id="markov-current-state" style="color:#9b59b6;font-weight:bold">medium</span>
+          &nbsp;|&nbsp; 次まで: <span id="markov-remaining">—</span>
         </div>
 
         <!-- 状態モニター（read-only） -->
@@ -810,6 +880,70 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
           <div class="chaos-bar-wrap">
             <div class="chaos-bar granular" id="cb-gran-spray" style="width:0%"></div>
             <div class="chaos-attractor" id="ca-gran-spray" style="display:none"></div>
+          </div>
+        </div>
+
+        <div class="msub" style="margin-top:.4rem">GRAN SYNTH</div>
+        <div class="chaos-row">
+          <div class="chaos-hd">
+            <span class="chaos-key">density</span>
+            <span class="chaos-val" id="cv-gsynth-density">—</span>
+          </div>
+          <div class="chaos-bar-wrap">
+            <div class="chaos-bar gran-synth" id="cb-gsynth-density" style="width:0%"></div>
+            <div class="chaos-attractor" id="ca-gsynth-density" style="display:none"></div>
+          </div>
+        </div>
+        <div class="chaos-row">
+          <div class="chaos-hd">
+            <span class="chaos-key">bright</span>
+            <span class="chaos-val" id="cv-gsynth-bright">—</span>
+          </div>
+          <div class="chaos-bar-wrap">
+            <div class="chaos-bar gran-synth" id="cb-gsynth-bright" style="width:0%"></div>
+            <div class="chaos-attractor" id="ca-gsynth-bright" style="display:none"></div>
+          </div>
+        </div>
+        <div class="chaos-row">
+          <div class="chaos-hd">
+            <span class="chaos-key">chaos</span>
+            <span class="chaos-val" id="cv-gsynth-chaos">—</span>
+          </div>
+          <div class="chaos-bar-wrap">
+            <div class="chaos-bar gran-synth" id="cb-gsynth-chaos" style="width:0%"></div>
+            <div class="chaos-attractor" id="ca-gsynth-chaos" style="display:none"></div>
+          </div>
+        </div>
+
+        <div class="msub" style="margin-top:.4rem">GRAN SAMPLER</div>
+        <div class="chaos-row">
+          <div class="chaos-hd">
+            <span class="chaos-key">density</span>
+            <span class="chaos-val" id="cv-gsamp-density">—</span>
+          </div>
+          <div class="chaos-bar-wrap">
+            <div class="chaos-bar gran-sampler" id="cb-gsamp-density" style="width:0%"></div>
+            <div class="chaos-attractor" id="ca-gsamp-density" style="display:none"></div>
+          </div>
+        </div>
+        <div class="chaos-row">
+          <div class="chaos-hd">
+            <span class="chaos-key">spray</span>
+            <span class="chaos-val" id="cv-gsamp-spray">—</span>
+          </div>
+          <div class="chaos-bar-wrap">
+            <div class="chaos-bar gran-sampler" id="cb-gsamp-spray" style="width:0%"></div>
+            <div class="chaos-attractor" id="ca-gsamp-spray" style="display:none"></div>
+          </div>
+        </div>
+        <div class="chaos-row">
+          <div class="chaos-hd">
+            <span class="chaos-key">pos</span>
+            <span class="chaos-val" id="cv-gsamp-pos">—</span>
+          </div>
+          <div class="chaos-bar-wrap">
+            <div class="chaos-bar gran-sampler" id="cb-gsamp-pos" style="width:0%"></div>
+            <div class="chaos-attractor" id="ca-gsamp-pos" style="display:none"></div>
           </div>
         </div>
 
@@ -929,6 +1063,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
         </div>
       </div>
     </div>
+
   </div><!-- #right-col2 -->
 
   <!-- LOG (span all columns) -->
@@ -1027,6 +1162,7 @@ function handleMessage(m) {
   else if (t === 'tidal_error')    { addLog('/tidal/err', m.message || ''); }
   else if (t === 'tidal_applied')  { tidalPresetApplied(m.preset); addLog('/tidal', 'applied: ' + (m.preset || '')); }
   else if (t === 'tidal_state')    { if (m.state) { setTidalRunning(!!m.state.running); if (m.state.preset) tidalPresetApplied(m.state.preset); } }
+  else if (t === 'markov_state')   { updateMarkovState(m.state || {}); }
   else { addLog(t || m.address || '?', JSON.stringify(m.args || m.params || {})); }
 }
 
@@ -1256,6 +1392,32 @@ function updateChaosState(params) {
     ];
     for (const r of rows) { if (r.src != null) { const u=_unpack(r.src); updateChaosBar(r.key,u.val,u.att,r.min,r.max,r.fmt); } }
   }
+  if (params.gran_synth) {
+    const g = params.gran_synth;
+    const rows = [
+      { key:'gsynth-density', src:g.density, min:1, max:80, fmt:v=>Math.round(v).toString() },
+      { key:'gsynth-bright',  src:g.bright,  min:0, max:1,  fmt:v=>v.toFixed(2) },
+      { key:'gsynth-chaos',   src:g.chaos,   min:0, max:1,  fmt:v=>v.toFixed(2) },
+    ];
+    for (const r of rows) { if (r.src != null) { const u=_unpack(r.src); updateChaosBar(r.key,u.val,u.att,r.min,r.max,r.fmt); } }
+  }
+  if (params.gran_sampler) {
+    const s = params.gran_sampler;
+    const rows = [
+      { key:'gsamp-density', src:s.density, min:1, max:80, fmt:v=>Math.round(v).toString() },
+      { key:'gsamp-spray',   src:s.spray,   min:0, max:1,  fmt:v=>v.toFixed(2) },
+      { key:'gsamp-pos',     src:s.pos,     min:0, max:1,  fmt:v=>v.toFixed(2) },
+    ];
+    for (const r of rows) { if (r.src != null) { const u=_unpack(r.src); updateChaosBar(r.key,u.val,u.att,r.min,r.max,r.fmt); } }
+  }
+  if (params.rhythmic && params.rhythmic.prob != null) {
+    const u = _unpack(params.rhythmic.prob);
+    const pct = (u.val * 100).toFixed(1);
+    const bar = document.getElementById('cb-ch-prob');
+    const vEl = document.getElementById('v-ch-prob');
+    if (bar) bar.style.width = pct + '%';
+    if (vEl) vEl.textContent = u.val.toFixed(2);
+  }
 }
 
 function updateChaosBar(key, value, attractor, min, max, fmt) {
@@ -1322,6 +1484,7 @@ function stopAll() {
   if (turBtn) turBtn.classList.remove('on');
   const turSt = document.getElementById('turing-status');
   if (turSt) { turSt.textContent = '停止'; turSt.style.color = 'var(--dim)'; }
+  setMarkovRunning(false);
   addLog('STOP', '全停止');
 }
 
@@ -1468,6 +1631,59 @@ function percWeights() {
 // ── TIDAL ─────────────────────────────────────────────────
 let tidalRunning = false;
 const TIDAL_PRESETS = ['minimal_klank','alva_euclidean','alva_phase','opn_sparse','chaos_collapse'];
+
+// ── Markov タイムスケール ────────────────────────────────────
+let markovRunning = false;
+
+function markovToggle() {
+  markovRunning = !markovRunning;
+  if (markovRunning) {
+    send({ address: '/matoma/markov/start', args: [] });
+    addLog('/markov', 'start');
+  } else {
+    send({ address: '/matoma/markov/stop', args: [] });
+    addLog('/markov', 'stop');
+  }
+  setMarkovRunning(markovRunning);
+}
+
+function setMarkovRunning(running) {
+  markovRunning = running;
+  const btn = document.getElementById('btn-markov-toggle');
+  const status = document.getElementById('markov-status');
+  if (btn) {
+    btn.textContent = running ? '■ MARKOV' : '▶ MARKOV';
+    btn.style.color = running ? 'var(--c-auto)' : '';
+    btn.style.borderColor = running ? 'var(--c-auto)' : '';
+  }
+  if (status) status.textContent = running ? '稼働中' : '停止';
+}
+
+function updateMarkovState(state) {
+  if (!state) return;
+  if (typeof state.running !== 'undefined') setMarkovRunning(!!state.running);
+  const cur = document.getElementById('markov-current-state');
+  if (cur && state.state) cur.textContent = state.state;
+  const rem = document.getElementById('markov-remaining');
+  if (rem && typeof state.remaining !== 'undefined') rem.textContent = Math.round(state.remaining) + 's';
+  const sldr = document.getElementById('markov-interval');
+  const val = document.getElementById('markov-interval-val');
+  if (sldr && state.interval) { sldr.value = state.interval; if (val) val.textContent = state.interval + 's'; }
+  if (typeof state.speed !== 'undefined') {
+    const pct = Math.min(100, state.speed / 2 * 100).toFixed(1);
+    const bar = document.getElementById('cb-ch-spd');
+    const vEl = document.getElementById('v-ch-spd');
+    if (bar) bar.style.width = pct + '%';
+    if (vEl) vEl.textContent = state.speed.toFixed(2);
+  }
+  if (typeof state.dejavu_prob !== 'undefined') {
+    const pct = (state.dejavu_prob * 100).toFixed(1);
+    const bar = document.getElementById('cb-ch-dej');
+    const vEl = document.getElementById('v-ch-dej');
+    if (bar) bar.style.width = pct + '%';
+    if (vEl) vEl.textContent = state.dejavu_prob.toFixed(2);
+  }
+}
 
 function tidalToggle() {
   tidalRunning = !tidalRunning;

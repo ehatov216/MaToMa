@@ -1,4 +1,4 @@
-<!-- Generated: 2026-03-31 | Files scanned: sc/*.scd (10ファイル) | Token estimate: ~850 -->
+<!-- Generated: 2026-04-04 (updated) | Files scanned: sc/*.scd (10ファイル) | Token estimate: ~900 -->
 # SuperCollider Architecture
 
 ## ファイル構成
@@ -183,13 +183,24 @@ PV_Diffuser (chaos 0.1-0.8) — 位相をランダム化
 グローバルエフェクトチェーンも含む
 ```
 
-## rhythmic.scd — Turing Machineシーケンサー
+## rhythmic.scd — リズム系 SynthDef 群（Tidal/Pythonからトリガー）
 
 ```
-16ステップ固定
-mutation_prob — ステップ値の変異確率
-trig_prob     — トリガー発火確率
-OSCdef でBPM・div・各ステップON/OFF・パラメーター制御
+SynthDef:
+  \matoma_rhythmic_grain  — グレイン風パーカッシブサウンド
+  \matoma_rhythmic_klank  — 金属的共鳴音（Klank）
+  \matoma_rhythmic_fm     — FM変調パーカッション
+  \matoma_rhythmic_spring — バネ・メタルサウンド（DFM1）
+  \matoma_rhythmic_chaos  — カオス風ノイズパーカッション
+
+OSCdef:
+  \matoma_rhythmic_trigger  /matoma/rhythmic/trigger [def_num, amp]
+                            — SynthDef番号(0-4)とampでトリガー
+  \matoma_rhythmic_load     /matoma/rhythmic/load    [sample_path]
+                            — サンプルバッファロード（将来拡張用）
+
+注: 旧Turingマシン制御（~turingRegister, ~turingProb等）は削除。
+    rhythmicレイヤーはTidalプリセットとChaosEngineに統合済み。
 ```
 
 ## percussion.scd — ドラムシンセ群

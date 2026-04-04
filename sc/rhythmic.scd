@@ -1,15 +1,10 @@
 /*
-MaToMa: リズム層（Rhythmic Layer）— Event層
-============================================
+MaToMa: リズム層（Rhythmic Layer）— SynthDef定義
+=================================================
 【設計思想】
-  Autechre / Alva Noto 的な「確率的打撃音」を実現する。
-  規則的なビートではなく、Turing Machineのシフトレジスタが
-  「どの音源を・いつ・どんな音程で叩くか」を確率的に決定する。
-
-  5種の音源が並列に存在し、Turing Machineのパターンが組み合わせを変える。
-  prob=0.0 → 同じループを繰り返す（ミニマル）
-  prob=0.5 → 徐々に変化（Autechre的・最も音楽的）
-  prob=1.0 → 完全ランダム（崩壊）
+  Autechre / Alva Noto 的な「確率的打撃音」を実現する5つの音源を定義する。
+  リズムのスケジューリングは TidalCycles が担い、
+  OSC経由で個別音源をトリガーする。
 
 【5つの音源】
   1. matoma_rhythmic_grain  : GrainBuf でサンプルを粒に分解（リズムの骨格）
@@ -19,19 +14,9 @@ MaToMa: リズム層（Rhythmic Layer）— Event層
   5. matoma_rhythmic_chaos  : HenonC → カオス写像（異物感・機械が壊れる感覚）
      ※ HenonC は sc3-plugins が必要。未インストール時は LFNoise2 で代替
 
-【Turing Machine の構造】
-  16ステップのシフトレジスタ（Array）をRoutineが1ステップずつ進める。
-  各ステップで「どの音源を叩くか」を確率的に決定する。
-  参照: synthesis_turing_machine.md § SC実装③ + § SC実装①
-
 【OSCアドレス】
   /matoma/rhythmic/trigger [synth_name] [freq] [amp]
-    → 特定音源を即座に叩く（外部制御・Tidal連携）
-  /matoma/rhythmic/param [key] [val]
-    → Turing Machine のパラメーター更新
-    key: prob (0.0-1.0), bpm (30-200), amp (0.0-1.0)
-  /matoma/rhythmic/start  → Turing Machine 開始
-  /matoma/rhythmic/stop   → Turing Machine 停止
+    → 特定音源を即座に叩く（TidalCycles からのトリガー）
 
 【シグナルルーティング】
   各音源 → 個別FreeVerb2（短め、打撃の輪郭を保つ）
@@ -255,56 +240,7 @@ s.waitForBoot({
     s.sync;
     "リズム音源定義完了: \\matoma_rhythmic_chaos".postln;
 
-    // ── グローバル変数の初期化 ─────────────────────────────────────────
-
-    // Turing Machine の状態管理
-    ~turingRegister = Array.fill(16, { [0, 1].choose }); // 16ビットシフトレジスタ
-    ~turingStep     = 0;
-    ~turingProb     = 0.3;   // 変化確率（0.0〜1.0）
-    ~turingBpm      = 120.0; // テンポ
-    ~turingAmp      = 0.5;   // ベース音量
-    ~turingRoutine  = nil;   // 実行中のRoutine
-
-    // 利用可能な音源リスト（Turing Machine が組み合わせを選ぶ）
-    ~rhythmicSynths = [\matoma_rhythmic_grain, \matoma_rhythmic_klank,
-                       \matoma_rhythmic_fm, \matoma_rhythmic_spring,
-                       \matoma_rhythmic_chaos];
-
-    // ミュージカルなスケール（Turing Machineが音程を選ぶ）
-    // マイナーペンタトニック（Autechre的な暗い音楽性）
-    ~rhythmicScale = [0, 3, 5, 7, 10, 12, 15, 17];  // 半音
-
-    // ── Turing Machine: シフトレジスタ更新関数 ──────────────────────
-    // 参照: synthesis_turing_machine.md § 基本原理
-    // 1ステップ進め、末尾ビットを確率的に変異させる
-    ~turingAdvance = {
-        var bit0 = ~turingRegister[0];
-        var newBit;
-
-        // PROB の確率でビットを反転、それ以外は先頭ビットをコピー
-        newBit = if (1.0.rand < ~turingProb) {
-            1 - bit0   // ビット反転（変異）
-        } {
-            bit0       // 先頭ビットのコピー（繰り返し）
-        };
-
-        // シフト: [b0,b1,...,b15] → [b1,...,b15,newBit]
-        ~turingRegister = ~turingRegister[1..] ++ [newBit];
-
-        // 現在のステップ（0〜15）
-        ~turingStep = (~turingStep + 1) % 16;
-
-        // 出力：先頭4ビットを使って音源と音程を決定
-        // ビット0-1 → 0〜3（音源インデックス）
-        // ビット2-3 → スケール内の音程インデックス
-        (
-            synthIdx: (~turingRegister[0] * 2 + ~turingRegister[1]) % ~rhythmicSynths.size,
-            scaleIdx: (~turingRegister[2] * 4 + ~turingRegister[3] * 2 +
-                       ~turingRegister[4]) % ~rhythmicScale.size
-        )
-    };
-
-    // ── OSCdef: 特定音源を即座に叩く（外部制御・Tidal連携） ──────────
+    // ── OSCdef: 特定音源を即座に叩く（TidalCycles連携） ─────────────
     // msg 形式: ['/matoma/rhythmic/trigger', 'synth_name', freq, amp]
     // 例: ['/matoma/rhythmic/trigger', 'matoma_rhythmic_klank', 440, 0.6]
     OSCdef(\matoma_rhythmic_trigger, { |msg|
@@ -336,73 +272,6 @@ s.waitForBoot({
         }.defer;
     }, '/matoma/rhythmic/trigger');
 
-    // ── OSCdef: Turing Machine パラメーター更新 ──────────────────────
-    // msg 形式: ['/matoma/rhythmic/param', 'key', value]
-    // key: prob (0.0-1.0), bpm (30-200), amp (0.0-1.0)
-    OSCdef(\matoma_rhythmic_param, { |msg|
-        var key   = msg[1].asSymbol;
-        var value = msg[2].asFloat;
-        {
-            switch(key)
-            { \prob } { ~turingProb = value.clip(0.0, 1.0); }
-            { \bpm  } { ~turingBpm  = value.clip(30, 200); }
-            { \amp  } { ~turingAmp  = value.clip(0.0, 1.0); }
-            ;
-            "リズム param: % = %".format(key, value.round(0.001)).postln;
-        }.defer;
-    }, '/matoma/rhythmic/param');
-
-    // ── OSCdef: Turing Machine 開始 ───────────────────────────────────
-    OSCdef(\matoma_rhythmic_start, { |msg|
-        {
-            if (~turingRoutine.notNil) {
-                ~turingRoutine.stop;
-            };
-
-            // Turing Machine のメインループ
-            // 参照: synthesis_turing_machine.md § SC実装③ の Routine パターン
-            ~turingRoutine = Routine({
-                loop {
-                    var result  = ~turingAdvance.();
-                    var synthSym = ~rhythmicSynths[result[\synthIdx]];
-                    var scaleDeg = ~rhythmicScale[result[\scaleIdx]];
-                    var freq     = 220.0 * (2 ** (scaleDeg / 12.0));
-                    var stepDur  = 60.0 / ~turingBpm;
-
-                    // ビット値が1のステップで音を鳴らす（0は休符）
-                    if (~turingRegister[0] == 1) {
-                        var buf = if (synthSym == \matoma_rhythmic_grain) {
-                            ~rhythmicBuf.bufnum
-                        } { 0 };
-
-                        Synth(synthSym, [
-                            \freq,   freq,
-                            \amp,    ~turingAmp * rrand(0.5, 1.0),
-                            \buf,    buf,
-                            \outBus, ~effectBus.index
-                        ], addAction: \addToTail);
-                    };
-
-                    stepDur.wait;
-                }
-            }).play;
-
-            "Turing Machine 開始 (prob: %, bpm: %)".format(
-                ~turingProb.round(0.01), ~turingBpm.round(0.1)).postln;
-        }.defer;
-    }, '/matoma/rhythmic/start');
-
-    // ── OSCdef: Turing Machine 停止 ───────────────────────────────────
-    OSCdef(\matoma_rhythmic_stop, { |msg|
-        {
-            if (~turingRoutine.notNil) {
-                ~turingRoutine.stop;
-                ~turingRoutine = nil;
-                "Turing Machine 停止".postln;
-            };
-        }.defer;
-    }, '/matoma/rhythmic/stop');
-
     // ── OSCdef: リズム用バッファのロード ─────────────────────────────
     OSCdef(\matoma_rhythmic_load, { |msg|
         var path = msg[1].asString;
@@ -421,17 +290,13 @@ s.waitForBoot({
         }.defer;
     }, '/matoma/rhythmic/load');
 
-    "MaToMa リズム層起動完了".postln;
+    "MaToMa リズム層起動完了（TidalCycles リズムソース）".postln;
     "".postln;
     "── 動作確認コマンド ──────────────────────────────────────────".postln;
-    "Turing Machine 開始:   NetAddr('127.0.0.1', 57120).sendMsg('/matoma/rhythmic/start')".postln;
-    "確率を上げる:           NetAddr('127.0.0.1', 57120).sendMsg('/matoma/rhythmic/param', 'prob', 0.5)".postln;
-    "BPM 変更:               NetAddr('127.0.0.1', 57120).sendMsg('/matoma/rhythmic/param', 'bpm', 140)".postln;
-    "Turing Machine 停止:   NetAddr('127.0.0.1', 57120).sendMsg('/matoma/rhythmic/stop')".postln;
-    "Klank を即叩く:         NetAddr('127.0.0.1', 57120).sendMsg('/matoma/rhythmic/trigger', 'matoma_rhythmic_klank', 440, 0.6)".postln;
-    "FM を即叩く:            NetAddr('127.0.0.1', 57120).sendMsg('/matoma/rhythmic/trigger', 'matoma_rhythmic_fm', 220, 0.5)".postln;
-    "Spring を即叩く:        NetAddr('127.0.0.1', 57120).sendMsg('/matoma/rhythmic/trigger', 'matoma_rhythmic_spring', 330, 0.4)".postln;
-    "Chaos を即叩く:         NetAddr('127.0.0.1', 57120).sendMsg('/matoma/rhythmic/trigger', 'matoma_rhythmic_chaos', 150, 0.5)".postln;
+    "Klank を即叩く: NetAddr('127.0.0.1', 57120).sendMsg('/matoma/rhythmic/trigger', 'matoma_rhythmic_klank', 440, 0.6)".postln;
+    "FM を即叩く:   NetAddr('127.0.0.1', 57120).sendMsg('/matoma/rhythmic/trigger', 'matoma_rhythmic_fm', 220, 0.5)".postln;
+    "Spring を叩く: NetAddr('127.0.0.1', 57120).sendMsg('/matoma/rhythmic/trigger', 'matoma_rhythmic_spring', 330, 0.4)".postln;
+    "Chaos を叩く:  NetAddr('127.0.0.1', 57120).sendMsg('/matoma/rhythmic/trigger', 'matoma_rhythmic_chaos', 150, 0.5)".postln;
 });
 )
 
@@ -439,15 +304,5 @@ s.waitForBoot({
 // 動作確認（このファイルを単独実行中のみ使用）
 // ────────────────────────────────────────────────────────────────────
 
-// Turing Machine を低確率（安定ループ）で開始
-// NetAddr("127.0.0.1", 57120).sendMsg('/matoma/rhythmic/start');
-// NetAddr("127.0.0.1", 57120).sendMsg('/matoma/rhythmic/param', 'prob', 0.1);
-
-// 確率を上げて変化を増やす（Autechre的）
-// NetAddr("127.0.0.1", 57120).sendMsg('/matoma/rhythmic/param', 'prob', 0.4);
-
-// 崩壊（prob=0.9）
-// NetAddr("127.0.0.1", 57120).sendMsg('/matoma/rhythmic/param', 'prob', 0.9);
-
-// 停止
-// NetAddr("127.0.0.1", 57120).sendMsg('/matoma/rhythmic/stop');
+// Klank を即叩く
+// NetAddr("127.0.0.1", 57120).sendMsg('/matoma/rhythmic/trigger', 'matoma_rhythmic_klank', 440, 0.6);
