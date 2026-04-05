@@ -1,91 +1,157 @@
 """
-ChaosEngine のユニットテスト
-============================
-「Dejavuパターンによる記憶付きカオスドリフト」が正しく動くかを検証する。
-実際のOSC通信・asyncio ループは使わず、純粋な計算ロジックをテストする。
+ThreeLayerController のユニットテスト
+=====================================
+3層制御（Upper=Markov、Middle=BoundedWalk、Lower=Dejavu）が
+正しく動くかを検証する。実際のOSC通信・asyncioループは使わず、
+純粋な計算ロジックをテストする。
 """
 
 import asyncio
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from collections import deque
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
-# ── _ChaosParam のテスト ───────────────────────────────
+# ── _middle_next のテスト ──────────────────────────────────────────
 
-def test_chaos_param_floor_ceiling():
-    """floor と ceiling が attractor ± range で計算されるか。"""
-    from backend.autonomous import _ChaosParam
-    p = _ChaosParam(value=60.0, attractor=60.0, range=20.0, speed=0.02)
-    assert p.floor == 40.0
-    assert p.ceiling == 80.0
-
-
-def test_chaos_param_with_value_is_immutable():
-    """with_value() は元のインスタンスを変更しない新インスタンスを返すか。"""
-    from backend.autonomous import _ChaosParam
-    original = _ChaosParam(value=60.0, attractor=60.0, range=20.0, speed=0.02)
-    updated = original.with_value(70.0)
-
-    assert original.value == 60.0   # 元のインスタンスは変わらない
-    assert updated.value == 70.0
-    assert updated.attractor == original.attractor
-    assert updated.range == original.range
-
-
-def test_chaos_param_with_attractor_is_immutable():
-    """with_attractor() は元のインスタンスを変更しない新インスタンスを返すか。"""
-    from backend.autonomous import _ChaosParam
-    original = _ChaosParam(value=60.0, attractor=60.0, range=20.0, speed=0.02)
-    updated = original.with_attractor(80.0, 30.0)
-
-    assert original.attractor == 60.0  # 元は変わらない
-    assert updated.attractor == 80.0
-    assert updated.range == 30.0
-    assert updated.value == 60.0       # value は変わらない
+def make_ctrl(
+    center: float = 0.25,
+    width: float = 0.10,
+    speed: float = 0.8,
+    snap_prob: float = 0.30,
+    micro_range: float = 0.025,
+    floor: float = 0.0,
+    ceiling: float = 1.0,
+):
+    from backend.three_layer_controller import UpperControl
+    return UpperControl(
+        center=center,
+        width=width,
+        speed=speed,
+        snap_prob=snap_prob,
+        micro_range=micro_range,
+        floor=floor,
+        ceiling=ceiling,
+    )
 
 
-def test_chaos_param_clamped():
-    """clamped() が [floor, ceiling] の外に出た値を収めるか。"""
-    from backend.autonomous import _ChaosParam
-    p = _ChaosParam(value=100.0, attractor=60.0, range=20.0, speed=0.02)
-    clamped = p.clamped()
+def test_middle_next_stays_within_zone(subtests):
+    """_middle_next() が zone [center-width, center+width] 内に収まるか（100回）。"""
+    from backend.three_layer_controller import _middle_next
+    ctrl = make_ctrl(center=0.25, width=0.10, floor=0.0, ceiling=1.0)
 
-    assert clamped.value == 80.0  # ceiling に収まる
-    assert p.value == 100.0       # 元は変わらない
+    current = 0.25
+    for _ in range(100):
+        new_val = _middle_next(current, ctrl)
+        lo = max(ctrl.floor, ctrl.center - ctrl.width)
+        hi = min(ctrl.ceiling, ctrl.center + ctrl.width)
+        assert lo <= new_val <= hi, (
+            f"zone外: {new_val:.4f} (lo={lo}, hi={hi})"
+        )
+        current = new_val
 
 
-def test_chaos_param_clamped_returns_self_if_within_range():
-    """値が範囲内のとき clamped() は同じインスタンスを返すか。"""
-    from backend.autonomous import _ChaosParam
-    p = _ChaosParam(value=60.0, attractor=60.0, range=20.0, speed=0.02)
-    assert p.clamped() is p
+def test_middle_next_converges_toward_center():
+    """_middle_next() が高速モードでは中心に引き寄せられるか（drift 方向の検証）。"""
+    from backend.three_layer_controller import _middle_next
+
+    # 中心より大幅に下にある current が、drift で上がる傾向を持つか
+    ctrl = make_ctrl(center=0.80, width=0.05, speed=1.0, floor=0.0, ceiling=1.0)
+    values = [_middle_next(0.30, ctrl) for _ in range(50)]
+    # 中心 0.80 に向かう引き寄せがあるなら、平均が 0.75 以上のゾーンに入るはず
+    assert max(values) >= ctrl.center - ctrl.width
 
 
-# ── ChaosEngine の基本動作テスト ────────────────────────
+# ── _lower_next のテスト ───────────────────────────────────────────
 
-def make_chaos_engine():
-    """テスト用の ChaosEngine インスタンスを作成する。"""
-    from backend.autonomous import ChaosEngine
+def test_lower_next_within_floor_ceiling():
+    """_lower_next() の出力が floor〜ceiling に収まるか（200回）。"""
+    from backend.three_layer_controller import _lower_next
+    ctrl = make_ctrl(center=0.25, width=0.10, snap_prob=0.5, micro_range=0.025,
+                     floor=0.0, ceiling=1.0)
+    history = deque([0.20, 0.22, 0.24], maxlen=8)
+
+    for _ in range(200):
+        val = _lower_next(0.25, ctrl, history)
+        assert ctrl.floor <= val <= ctrl.ceiling, (
+            f"floor/ceiling外: {val}"
+        )
+
+
+def test_lower_next_uses_history_when_snap():
+    """snap_prob=1.0 のとき必ず履歴から値を取り出すか。"""
+    from backend.three_layer_controller import _lower_next
+    ctrl = make_ctrl(snap_prob=1.0, micro_range=0.0, floor=0.0, ceiling=1.0)
+    historical = 0.777
+    history = deque([historical], maxlen=8)
+
+    with patch("random.random", return_value=0.0):   # 0.0 < 1.0 → snap 確定
+        val = _lower_next(0.25, ctrl, history)
+
+    assert val == historical
+
+
+def test_lower_next_uses_micro_noise_when_no_snap():
+    """snap しない場合は middle 周辺の micro_range 内に収まるか。"""
+    from backend.three_layer_controller import _lower_next
+    ctrl = make_ctrl(snap_prob=0.0, micro_range=0.001, floor=0.0, ceiling=1.0)
+    history = deque(maxlen=8)
+
+    for _ in range(50):
+        val = _lower_next(0.50, ctrl, history)
+        # micro_range が 0.001 → gauss(0, 0.0005) なので通常は ±0.01 以内
+        assert abs(val - 0.50) < 0.05
+
+
+def test_lower_next_empty_history_no_snap():
+    """履歴が空のとき snap せずに micro_range だけで揺らすか。"""
+    from backend.three_layer_controller import _lower_next
+    ctrl = make_ctrl(snap_prob=0.9, micro_range=0.0, floor=0.0, ceiling=1.0)
+    history = deque(maxlen=8)   # 空
+
+    val = _lower_next(0.50, ctrl, history)
+    # 履歴なし → スナップ不可 → middle そのまま（micro_range=0 なので noise=0）
+    assert val == 0.50
+
+
+# ── UpperControl の検証 ───────────────────────────────────────────
+
+def test_upper_control_fields():
+    """UpperControl が全フィールドを保持するか。"""
+    from backend.three_layer_controller import UpperControl
+    uc = UpperControl(
+        center=0.4, width=0.1, speed=0.8,
+        snap_prob=0.3, micro_range=0.025,
+        floor=0.0, ceiling=1.0,
+    )
+    assert uc.center == 0.4
+    assert uc.snap_prob == 0.3
+    assert uc.floor == 0.0
+
+
+# ── ThreeLayerController 初期状態テスト ──────────────────────────
+
+def make_controller():
+    from backend.three_layer_controller import ThreeLayerController
     send_osc = MagicMock()
     broadcast = AsyncMock()
-    return ChaosEngine(send_osc, broadcast), send_osc, broadcast
+    return ThreeLayerController(send_osc, broadcast), send_osc, broadcast
 
 
-def test_chaos_engine_initial_state():
-    """ChaosEngine の初期状態に全レイヤーが含まれているか。"""
-    engine, _, _ = make_chaos_engine()
-    state = engine.get_state()
-
+def test_controller_initial_layers():
+    """初期状態に全4レイヤーが含まれているか。"""
+    ctrl, _, _ = make_controller()
+    state = ctrl.get_state()
     assert "drone" in state
     assert "granular" in state
-    assert "rhythmic" in state
+    assert "gran_synth" in state
+    assert "gran_sampler" in state
 
 
-def test_chaos_engine_state_has_value_attractor_range():
-    """get_state() の各パラメーターに value, attractor, range が含まれるか。"""
-    engine, _, _ = make_chaos_engine()
-    state = engine.get_state()
+def test_controller_state_has_value_attractor_range():
+    """get_state() の各パラメーターに value / attractor / range が含まれるか。"""
+    ctrl, _, _ = make_controller()
+    state = ctrl.get_state()
 
     for layer_state in state.values():
         for param_state in layer_state.values():
@@ -94,181 +160,142 @@ def test_chaos_engine_state_has_value_attractor_range():
             assert "range" in param_state
 
 
-def test_chaos_engine_set_scene_updates_attractor():
-    """set_scene() がattractorを正しく更新するか。"""
-    engine, _, _ = make_chaos_engine()
+def test_controller_initial_value_within_specs():
+    """初期値が PARAM_SPECS の [min, max] 内に収まるか。"""
+    from backend.three_layer_controller import PARAM_SPECS, ThreeLayerController
+    ctrl, _, _ = make_controller()
+    state = ctrl.get_state()
 
-    scene = {
-        "drone": {
-            "freq_attractor": 41.0,
-            "freq_range": 15.0,
-            "feedback_attractor": 0.35,
-            "shimmer_attractor": 0.5,
-            "room_attractor": 0.92,
-        },
-        "granular": {
-            "density_attractor": 5.0,
-            "density_range": 8.0,
-            "spray_attractor": 0.3,
-            "room_attractor": 0.7,
-        },
-        "rhythmic": {
-            "prob_attractor": 0.1,
-            "prob_range": 0.1,
-        },
-    }
-    engine.set_scene(scene)
-    state = engine.get_state()
-
-    assert state["drone"]["freq"]["attractor"] == 41.0
-    assert state["drone"]["freq"]["range"] == 15.0
-    assert state["drone"]["feedback_amt"]["attractor"] == 0.35
-    assert state["granular"]["density"]["attractor"] == 5.0
-    assert state["granular"]["density"]["range"] == 8.0
-    assert state["rhythmic"]["prob"]["attractor"] == 0.1
+    for layer, params in PARAM_SPECS.items():
+        for param, specs in params.items():
+            min_val, max_val, init_val = specs[0], specs[1], specs[2]
+            v = state[layer][param]["value"]
+            assert min_val <= v <= max_val, (
+                f"{layer}/{param}: {v} は [{min_val}, {max_val}] 外"
+            )
 
 
-def test_chaos_engine_set_scene_does_not_change_current_value():
-    """set_scene() はattractorを更新するが現在値は急変しないか。"""
-    engine, _, _ = make_chaos_engine()
-    initial_freq_value = engine.get_state()["drone"]["freq"]["value"]
+# ── set_scene() のテスト ──────────────────────────────────────────
 
-    engine.set_scene({
-        "drone": {"freq_attractor": 200.0, "freq_range": 10.0},
-        "granular": {},
-        "rhythmic": {},
+def test_set_scene_updates_attractor():
+    """set_scene() が attractor（zone center）を更新するか。"""
+    ctrl, _, _ = make_controller()
+    ctrl.set_scene({
+        "drone":    {"feedback_attractor": 0.8},
+        "granular": {"density_attractor": 30.0, "density_range": 10.0},
     })
-
-    # 引力点は変わったが現在値はそのまま
-    state = engine.get_state()
-    assert state["drone"]["freq"]["value"] == initial_freq_value
-    assert state["drone"]["freq"]["attractor"] == 200.0
-
-
-# ── Dejavu ロジックのテスト ────────────────────────────
-
-def test_next_value_stays_within_bounds():
-    """_next_value() が floor〜ceiling の境界内に収まるか（100回試行）。"""
-    from backend.autonomous import ChaosEngine, _ChaosParam
-    engine, _, _ = make_chaos_engine()
-
-    p = _ChaosParam(value=60.0, attractor=60.0, range=20.0, speed=0.02)
-    path = "drone/freq"
-    # 履歴は空の状態でテスト
-
-    for _ in range(100):
-        new_val = engine._next_value(path, p)
-        assert p.floor <= new_val <= p.ceiling, \
-            f"境界外: {new_val} (floor={p.floor}, ceiling={p.ceiling})"
+    state = ctrl.get_state()
+    assert state["drone"]["feedback_amt"]["attractor"] == 0.8
+    assert state["granular"]["density"]["attractor"] == 30.0
+    assert state["granular"]["density"]["range"] == 10.0
 
 
-def test_next_value_uses_history_when_available():
-    """履歴がある場合に確率的に過去の値が選ばれるか（統計的検証）。"""
-    from backend.autonomous import ChaosEngine, _ChaosParam
-    import random
+def test_set_scene_does_not_change_current_value():
+    """set_scene() は attractor を変えるが現在値を急変させないか。"""
+    ctrl, _, _ = make_controller()
+    initial_feedback = ctrl.get_state()["drone"]["feedback_amt"]["value"]
 
-    engine, _, _ = make_chaos_engine()
-    p = _ChaosParam(value=60.0, attractor=60.0, range=20.0, speed=0.02)
-    path = "drone/freq"
+    ctrl.set_scene({"drone": {"feedback_attractor": 0.99}, "granular": {}})
 
-    # 履歴に特定の値を入れる（境界内の値を使う）
-    historical_value = 65.0
-    engine._history[path] = deque([historical_value], maxlen=8)
-
-    # DEJAVU_PROB=0.3 なので十分な試行で少なくとも1回は過去値が選ばれるはず
-    selected_values = set()
-    with patch("random.random", side_effect=[0.1] + [0.9] * 99):
-        # 最初の1回は dejavu_prob 以下の乱数 → 過去値を返す
-        val = engine._next_value(path, p)
-        selected_values.add(val)
-
-    assert historical_value in selected_values
+    state = ctrl.get_state()
+    assert state["drone"]["feedback_amt"]["value"] == initial_feedback
+    assert state["drone"]["feedback_amt"]["attractor"] == 0.99
 
 
-# ── asyncio tick のテスト ──────────────────────────────
+# ── _tick() のテスト ──────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_tick_sends_osc_messages():
-    """_tick() が全パラメーターにOSCメッセージを送るか。"""
-    from backend.autonomous import ChaosEngine
-    send_osc = MagicMock()
-    broadcast = AsyncMock()
-    engine = ChaosEngine(send_osc, broadcast)
+async def test_tick_sends_osc_for_all_layers():
+    """_tick() が全レイヤーにOSCメッセージを送るか。"""
+    from backend.three_layer_controller import PARAM_SPECS
+    ctrl, send_osc, _ = make_controller()
 
-    await engine._tick()
+    await ctrl._tick()
 
-    # drone, granular, rhythmic の全パラメーターにOSCが送られているか
     assert send_osc.called
-    calls = send_osc.call_args_list
-    addresses = [call[0][0] for call in calls]
-    assert "/matoma/drone/param" in addresses
-    assert "/matoma/granular/param" in addresses
-    assert "/matoma/rhythmic/param" in addresses
+    addresses = {call[0][0] for call in send_osc.call_args_list}
+    assert "/matoma/drone/param"       in addresses
+    assert "/matoma/granular/param"    in addresses
+    assert "/matoma/gran_synth/param"  in addresses
+    assert "/matoma/gran_sampler/param" in addresses
 
 
 @pytest.mark.asyncio
 async def test_tick_broadcasts_chaos_state():
     """_tick() 後にブラウザへ chaos_state が送られるか。"""
-    from backend.autonomous import ChaosEngine
-    send_osc = MagicMock()
-    broadcast = AsyncMock()
-    engine = ChaosEngine(send_osc, broadcast)
+    ctrl, _, broadcast = make_controller()
 
-    await engine._tick()
+    await ctrl._tick()
 
     broadcast.assert_awaited_once()
-    call_args = broadcast.call_args[0][0]
-    assert call_args["type"] == "chaos_state"
-    assert "state" in call_args
+    payload = broadcast.call_args[0][0]
+    assert payload["type"] == "chaos_state"
+    assert "state" in payload
 
 
 @pytest.mark.asyncio
 async def test_tick_accumulates_history():
     """_tick() を繰り返すと履歴が蓄積されるか。"""
-    from backend.autonomous import ChaosEngine
-    send_osc = MagicMock()
-    broadcast = AsyncMock()
-    engine = ChaosEngine(send_osc, broadcast)
+    from backend.three_layer_controller import HISTORY_LEN
+    ctrl, _, _ = make_controller()
+    path = "drone/feedback_amt"
 
-    assert len(engine._history["drone/freq"]) == 0
-    await engine._tick()
-    assert len(engine._history["drone/freq"]) == 1
-    await engine._tick()
-    assert len(engine._history["drone/freq"]) == 2
+    assert len(ctrl._history[path]) == 0
+    await ctrl._tick()
+    assert len(ctrl._history[path]) == 1
+    await ctrl._tick()
+    assert len(ctrl._history[path]) == 2
 
 
 @pytest.mark.asyncio
-async def test_history_max_len_is_8():
-    """履歴が最大8世代を超えないか。"""
-    from backend.autonomous import ChaosEngine
-    send_osc = MagicMock()
-    broadcast = AsyncMock()
-    engine = ChaosEngine(send_osc, broadcast)
+async def test_history_max_len_respected():
+    """履歴が HISTORY_LEN（8）を超えないか。"""
+    from backend.three_layer_controller import HISTORY_LEN
+    ctrl, _, _ = make_controller()
 
     for _ in range(20):
-        await engine._tick()
+        await ctrl._tick()
 
-    for path, history in engine._history.items():
-        assert len(history) <= ChaosEngine.HISTORY_LEN, \
-            f"{path}: 履歴が {len(history)} 件（最大 {ChaosEngine.HISTORY_LEN}）"
+    for path, hist in ctrl._history.items():
+        assert len(hist) <= HISTORY_LEN, (
+            f"{path}: 履歴が {len(hist)} 件（最大 {HISTORY_LEN}）"
+        )
 
 
-# ── start/stop のテスト ────────────────────────────────
+# ── start / stop のテスト ─────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_chaos_engine_start_stop():
+async def test_controller_start_stop_flag():
     """start() / stop() が is_running フラグを正しく切り替えるか。"""
-    from backend.autonomous import ChaosEngine
-    send_osc = MagicMock()
-    broadcast = AsyncMock()
-    engine = ChaosEngine(send_osc, broadcast)
+    ctrl, _, _ = make_controller()
 
-    assert not engine.is_running
+    assert not ctrl.is_running
 
-    engine.start()
-    assert engine.is_running
+    loop = asyncio.get_running_loop()
+    # start() は asyncio タスクを作るため running loop が必要
+    ctrl.start()
+    assert ctrl.is_running
 
-    engine.stop()
-    assert not engine.is_running
-    # 少し待ってループが止まっていることを確認
+    ctrl.stop()
+    assert not ctrl.is_running
+    # ループが確実に止まるのを少し待つ
     await asyncio.sleep(0.05)
+
+
+# ── set_speed / set_dejavu_prob のテスト ──────────────────────────
+
+def test_set_speed_affects_upper_override():
+    """set_speed() が UpperLayer の speed_override に反映されるか。"""
+    ctrl, _, _ = make_controller()
+    ctrl.set_speed(1.5)
+    # get_control() 経由で speed が反映される
+    uc = ctrl._upper.get_control("drone", "feedback_amt")
+    assert uc.speed == 1.5
+
+
+def test_set_dejavu_prob_affects_upper_override():
+    """set_dejavu_prob() が UpperLayer の snap_override に反映されるか。"""
+    ctrl, _, _ = make_controller()
+    ctrl.set_dejavu_prob(0.9)
+    uc = ctrl._upper.get_control("granular", "density")
+    assert uc.snap_prob == 0.9

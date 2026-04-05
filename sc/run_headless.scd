@@ -1482,6 +1482,17 @@ s.waitForBoot({
     NetAddr("127.0.0.1", 9000).sendMsg('/matoma/ready');
     ">>> /matoma/ready 送信完了".postln;
 
+    // ── Studio Mode 用 ハートビート（5秒ごと）────────────────────────
+    // Python が /matoma/heartbeat を受け取るたびにブラウザへ転送し、
+    // SC が生きているかどうかを Studio Mode で可視化する。
+    {
+        var pythonAddr = NetAddr("127.0.0.1", 9000);
+        AppClock.schedAbs(0, {
+            pythonAddr.sendMsg('/matoma/heartbeat');
+            5.0  // 5秒後に再実行
+        });
+    }.defer(1.0);
+
     // ── 音声デバイスリストを Python へ送信 ─────────────────────────
     // /matoma/ready の後に遅延させて確実に届けるため 0.5秒待つ
     {

@@ -19,6 +19,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -28,12 +29,12 @@ from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import AsyncIOOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
 
-from autonomous import AutonomousMode, ChaosEngine
-from markov_timescale import MarkovTimescale
+from autonomous import AutonomousMode
+from musical_control import MusicalControl
+from three_layer_controller import ThreeLayerController
 from param_mapper import (
     chaos_to_internal,
     density_to_internal,
-    mutation_prob_from_chaos,
     tension_to_internal,
     trig_prob_from_density,
 )
@@ -41,7 +42,7 @@ from scenes import get_scene, scene_to_osc_messages
 from sequencer import TuringSequencer
 from tidal_controller import TidalController
 from tidal_patterns import get_preset, PRESETS
-from turing_gene import TuringGene
+
 
 
 def _coreaudio_lib():
@@ -170,8 +171,8 @@ sc_client = SimpleUDPClient(SC_HOST, SC_PORT)
 # 自律モード（broadcast は後で関数参照として渡す）
 autonomous: Optional[AutonomousMode] = None
 
-# カオスエンジン（Dejavu パターンによる記憶付きドリフト）
-chaos_engine: Optional[ChaosEngine] = None
+# 3レイヤー制御コントローラー（Upper=Markov / Middle=BoundedWalk / Lower=Dejavu）
+controller: Optional[ThreeLayerController] = None
 
 # Tidal Cycles コントローラー
 tidal: Optional[TidalController] = None
@@ -179,11 +180,8 @@ tidal: Optional[TidalController] = None
 # Turing Machine ステップシーケンサー
 sequencer: Optional[TuringSequencer] = None
 
-# Layer B: チューリング遷伝子（シフトレジスタ変异型Pitchシーケンサー）
-turing_gene: Optional[TuringGene] = None
-
-# Markov タイムスケール（上位層, 256s+）
-markov: Optional[MarkovTimescale] = None
+# Musical Control（キー・スケール・コード進行の制御）
+musical: Optional[MusicalControl] = None
 
 # SC プロセス
 sc_process = None
@@ -191,6 +189,27 @@ sc_process = None
 # SC が ready かどうか
 sc_ready = False
 
+# SC からの最終ハートビート受信時刻（Studio Mode 用）
+sc_last_heartbeat: float = 0.0
+
+
+def _send_osc(address: str, args: list) -> None:
+    """SC へ OSC を送信し、Studio Mode 用にブロードキャストする。
+
+    ThreeLayerController など自律モジュールから呼ばれる。
+    送信内容は WebSocket 経由でブラウザの Studio Mode に表示される。
+    """
+    sc_client.send_message(address, args)
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(broadcast({
+            "type": "osc_sent",
+            "address": address,
+            "args": args if isinstance(args, list) else list(args),
+            "ts": time.time(),
+        }))
+    except RuntimeError:
+        pass  # イベントループが未起動の場合は無視
 
 
 def find_sclang() -> str | None:
@@ -347,14 +366,25 @@ def _handle_osc_message(address: str, *args) -> None:
         )
         return
 
+    if address == "/matoma/heartbeat":
+        global sc_last_heartbeat
+        sc_last_heartbeat = time.time()
+        asyncio.get_running_loop().create_task(
+            broadcast({"type": "sc_heartbeat", "ts": sc_last_heartbeat})
+        )
+        return
+
     if address == "/matoma/ready":
         sc_ready = True
         log.info("SC ready 受信 → ブラウザへ通知")
-        # SC 起動完了と同時に ChaosEngine を自動スタート
+        # SC 起動完了と同時に ThreeLayerController を自動スタート
         # （これがないとパラメーターが一切変化しない）
-        if chaos_engine is not None:
-            chaos_engine.start()
-            log.info("ChaosEngine 自動スタート")
+        if controller is not None:
+            controller.start()
+            log.info("ThreeLayerController 自動スタート")
+        if musical is not None:
+            musical.start()
+            log.info("MusicalControl 自動スタート")
         asyncio.get_running_loop().create_task(
             broadcast({"type": "sc_ready", "message": "SC起動完了"})
         )
@@ -472,30 +502,25 @@ async def ws_handler(websocket) -> None:
                     if scene:
                         for osc in scene_to_osc_messages(scene):
                             sc_client.send_message(osc["address"], osc["args"])
-                        # ChaosEngine の引力点をシーンに合わせて更新する
-                        if chaos_engine is not None:
-                            chaos_engine.set_scene(scene)
-                        # TuringGene: DNAを新シーンに切替（山/void等に名前変更済み）
-                        if turing_gene is not None:
-                            turing_gene.set_scene_dna(scene_name)
+                        # コントローラーの引力点をシーンに合わせて更新する
+                        if controller is not None:
+                            controller.set_scene(scene)
                         await broadcast({"type": "scene_changed", "scene": scene})
                         log.info(f"シーン切り替え: {scene_name}")
                     else:
                         log.warning(f"シーンが見つかりません: {scene_name}")
 
                 elif address == "/matoma/chaos/state":
-                    # カオスエンジンの現在状態をブラウザへ送る
-                    if chaos_engine is not None:
+                    # コントローラーの現在状態をブラウザへ送る
+                    if controller is not None:
                         await broadcast({
                             "type": "chaos_state",
-                            "state": chaos_engine.get_state(),
+                            "state": controller.get_state(),
                         })
 
                 elif address == "/matoma/all/stop":
-                    if markov is not None:
-                        markov.stop()
-                    if chaos_engine is not None:
-                        chaos_engine.stop()
+                    if controller is not None:
+                        controller.stop()
                     if autonomous is not None:
                         autonomous.stop()
                     sc_client.send_message("/matoma/all/stop", [])
@@ -503,8 +528,8 @@ async def ws_handler(websocket) -> None:
                     await broadcast({"type": "all_stopped"})
 
                 elif address == "/matoma/all/restart":
-                    if chaos_engine is not None:
-                        chaos_engine.stop()
+                    if controller is not None:
+                        controller.stop()
                     if autonomous is not None:
                         autonomous.stop()
                     sc_client.send_message("/matoma/all/restart", [])
@@ -514,12 +539,12 @@ async def ws_handler(websocket) -> None:
                 elif address == "/matoma/chaos/attractor":
                     # 引力点を手動で設定する
                     # args: [layer, param, attractor, range_opt]
-                    if chaos_engine is not None and len(args) >= 3:
+                    if controller is not None and len(args) >= 3:
                         layer_name = str(args[0])
                         param_name = str(args[1])
                         attractor_val = float(args[2])
                         range_val = float(args[3]) if len(args) >= 4 else None
-                        chaos_engine.set_attractor(
+                        controller.set_attractor(
                             layer_name, param_name, attractor_val, range_val
                         )
                         log.info(
@@ -529,75 +554,75 @@ async def ws_handler(websocket) -> None:
 
                 elif address == "/matoma/chaos/speed":
                     # カオスの変化速度（0=ゆっくり / 1=速い）
-                    if chaos_engine is not None and args:
-                        chaos_engine.set_speed(float(args[0]))
-                        log.info(f"ChaosEngine speed: {args[0]}")
+                    if controller is not None and args:
+                        controller.set_speed(float(args[0]))
+                        log.info(f"speed: {args[0]}")
 
                 elif address == "/matoma/chaos/dejavu":
                     # 過去パターンを繰り返す確率（0=常に新しい / 1=常に繰り返す）
-                    if chaos_engine is not None and args:
-                        chaos_engine.set_dejavu_prob(float(args[0]))
-                        log.info(f"ChaosEngine dejavu: {args[0]}")
+                    if controller is not None and args:
+                        controller.set_dejavu_prob(float(args[0]))
+                        log.info(f"dejavu: {args[0]}")
 
                 elif address == "/matoma/chaos/start":
-                    # カオスエンジンを開始する
-                    if chaos_engine is not None:
-                        chaos_engine.start()
-                    log.info("ChaosEngine 開始")
+                    # コントローラーを開始する
+                    if controller is not None:
+                        controller.start()
+                    log.info("ThreeLayerController 開始")
                     await broadcast({"type": "chaos_started"})
 
                 elif address == "/matoma/chaos/stop":
-                    # カオスエンジンを停止する
-                    if chaos_engine is not None:
-                        chaos_engine.stop()
-                    log.info("ChaosEngine 停止")
+                    # コントローラーを停止する
+                    if controller is not None:
+                        controller.stop()
+                    log.info("ThreeLayerController 停止")
                     await broadcast({"type": "chaos_stopped"})
 
                 # ── Markov タイムスケール ──────────────────────────────────
                 elif address == "/matoma/markov/start":
-                    if markov is not None:
-                        markov.start()
-                        await broadcast({"type": "markov_state", "state": markov.get_state()})
+                    if controller is not None:
+                        controller.start_markov()
+                        await broadcast({"type": "markov_state", "state": controller.get_markov_state()})
                     log.info("Markov 開始")
 
                 elif address == "/matoma/markov/stop":
-                    if markov is not None:
-                        markov.stop()
-                        await broadcast({"type": "markov_state", "state": markov.get_state()})
+                    if controller is not None:
+                        controller.stop_markov()
+                        await broadcast({"type": "markov_state", "state": controller.get_markov_state()})
                     log.info("Markov 停止")
 
                 elif address == "/matoma/markov/interval":
-                    if markov is not None and args:
-                        markov.set_interval(float(args[0]))
-                        await broadcast({"type": "markov_state", "state": markov.get_state()})
+                    if controller is not None and args:
+                        controller.set_markov_interval(float(args[0]))
+                        await broadcast({"type": "markov_state", "state": controller.get_markov_state()})
                     log.info(f"Markov interval: {args[0] if args else '?'}")
 
                 elif address == "/matoma/markov/state":
                     # フロントエンドからのポーリング
-                    if markov is not None:
-                        await broadcast({"type": "markov_state", "state": markov.get_state()})
+                    if controller is not None:
+                        await broadcast({"type": "markov_state", "state": controller.get_markov_state()})
 
                 # ── レイヤーモデル選択 ────────────────────────────────────
                 elif address == "/matoma/layer/middle/model":
-                    if chaos_engine is not None and args:
-                        chaos_engine.set_middle_model(str(args[0]))
+                    if controller is not None and args:
+                        controller.set_middle_model(str(args[0]))
                         log.info(f"middle model → {args[0]}")
 
                 elif address == "/matoma/layer/lower/model":
-                    if chaos_engine is not None and args:
-                        chaos_engine.set_lower_model(str(args[0]))
+                    if controller is not None and args:
+                        controller.set_lower_model(str(args[0]))
                         log.info(f"lower model → {args[0]}")
 
                 elif address == "/matoma/layer/middle/chaos":
                     # 中位レイヤーの反復↔カオス比率（0.0=繰り返し, 1.0=カオス）
-                    if chaos_engine is not None and args:
-                        chaos_engine.set_middle_chaos(float(args[0]))
+                    if controller is not None and args:
+                        controller.set_middle_chaos(float(args[0]))
                         log.info(f"middle chaos ratio → {args[0]}")
 
                 elif address == "/matoma/layer/lower/chaos":
                     # 下位レイヤーの反復↔カオス比率（0.0=繰り返し, 1.0=カオス）
-                    if chaos_engine is not None and args:
-                        chaos_engine.set_lower_chaos(float(args[0]))
+                    if controller is not None and args:
+                        controller.set_lower_chaos(float(args[0]))
                         log.info(f"lower chaos ratio → {args[0]}")
 
                 elif address.startswith("/matoma/autonomous/"):
@@ -672,6 +697,9 @@ async def ws_handler(websocket) -> None:
                 elif address.startswith("/matoma/tidal/"):
                     await _handle_tidal(address, args, websocket)
 
+                elif address.startswith("/matoma/musical/"):
+                    await _handle_musical(address, args, websocket)
+
                 elif address == "/matoma/granular/browse":
                     await _handle_granular_browse(websocket)
 
@@ -681,19 +709,8 @@ async def ws_handler(websocket) -> None:
                 elif address.startswith("/matoma/seq/"):
                     await _handle_seq(address, args, websocket)
 
-                elif address.startswith("/matoma/turing/"):
-                    await _handle_turing(address, args, websocket)
-
                 elif address.startswith("/matoma/flute/"):
                     await _handle_flute(address, args, websocket)
-
-                elif address == "/matoma/drop/state" and args:
-                    drop_state = str(args[0])
-                    sc_client.send_message(address, args)
-                    await broadcast(
-                        {"type": "drop_changed", "state": drop_state}
-                    )
-                    log.info(f"DROP: {drop_state}")
 
                 elif address == "/matoma/energy/set" and args:
                     sc_client.send_message(address, args)
@@ -794,6 +811,53 @@ async def _handle_tidal(address: str, args: list, websocket) -> None:
         )
 
 
+async def _handle_musical(address: str, args: list, websocket) -> None:
+    """Musical Control 関連のWebSocketメッセージを処理する。
+
+    エンドポイント一覧:
+      /matoma/musical/key_mode    args: ["fixed"|"auto"]
+      /matoma/musical/chord_mode  args: ["fixed"|"auto"]
+      /matoma/musical/fixed_key   args: [key, scale?]  例: ["c", "minor"]
+      /matoma/musical/fixed_chords args: [0, 3, 4, 0]  (コードディグリーのリスト)
+      /matoma/musical/interval    args: [秒数]
+      /matoma/musical/state       (現在状態を返す)
+    """
+    if musical is None:
+        log.warning("MusicalControl未初期化")
+        return
+    sub = address[len("/matoma/musical/"):]
+
+    if sub == "key_mode" and args:
+        musical.set_key_mode(str(args[0]))
+        await broadcast({"type": "musical_state", "state": musical.get_state()})
+
+    elif sub == "chord_mode" and args:
+        musical.set_chord_mode(str(args[0]))
+        await broadcast({"type": "musical_state", "state": musical.get_state()})
+
+    elif sub == "fixed_key" and args:
+        key = str(args[0])
+        scale = str(args[1]) if len(args) > 1 else None
+        musical.set_fixed_key(key, scale)
+        await broadcast({"type": "musical_state", "state": musical.get_state()})
+
+    elif sub == "fixed_chords" and args:
+        degrees = [int(a) for a in args]
+        musical.set_fixed_chords(degrees)
+        await broadcast({"type": "musical_state", "state": musical.get_state()})
+
+    elif sub == "interval" and args:
+        musical.set_chord_interval(float(args[0]))
+        await broadcast({"type": "musical_state", "state": musical.get_state()})
+
+    elif sub == "state":
+        await websocket.send(
+            json.dumps({"type": "musical_state", "state": musical.get_state()})
+        )
+
+    log.info(f"Musical: {sub}  args={args}")
+
+
 async def _handle_seq(address: str, args: list, websocket) -> None:
     """シーケンサー関連の WebSocket メッセージを処理する。"""
     if sequencer is None:
@@ -813,8 +877,6 @@ async def _handle_seq(address: str, args: list, websocket) -> None:
 
     elif sub == "bpm" and args:
         sequencer.set_bpm(float(args[0]))
-        if turing_gene is not None:
-            turing_gene.set_bpm(float(args[0]))
         log.info(f"seq BPM: {args[0]}")
 
     elif sub == "step_div" and args:
@@ -841,36 +903,6 @@ async def _handle_seq(address: str, args: list, websocket) -> None:
         )
 
 
-async def _handle_turing(address: str, args: list, websocket) -> None:
-    """チューリング遺伝子のWS制御を処理する。"""
-    sub = address[len("/matoma/turing/"):]
-
-    if sub == "start":
-        if turing_gene is not None:
-            await turing_gene.start()
-        state = turing_gene.get_state() if turing_gene else {}
-        await broadcast({"type": "turing_state", "state": state})
-        log.info("TuringGene 開始")
-
-    elif sub == "stop":
-        if turing_gene is not None:
-            await turing_gene.stop()
-        state = turing_gene.get_state() if turing_gene else {}
-        await broadcast({"type": "turing_state", "state": state})
-        log.info("TuringGene 停止")
-
-    elif sub == "mutation_bars":
-        if turing_gene is not None and args:
-            turing_gene.set_mutation_bars(int(float(args[0])))
-            log.info(f"TuringGene mutation_bars: {args[0]}")
-
-    elif sub == "state":
-        state = turing_gene.get_state() if turing_gene is not None else {}
-        await websocket.send(
-            json.dumps({"type": "turing_state", "state": state})
-        )
-
-
 async def _handle_flute(address: str, args: list, _websocket) -> None:
     """3本の笛（CHAOS/DENSITY/TENSION）をOSC展開してSCへ送信する。"""
     sub = address[len("/matoma/flute/"):]
@@ -881,8 +913,6 @@ async def _handle_flute(address: str, args: list, _websocket) -> None:
     if sub == "chaos":
         for osc_addr, osc_args in chaos_to_internal(value):
             sc_client.send_message(osc_addr, osc_args)
-        if turing_gene is not None:
-            turing_gene.set_mutation_prob(mutation_prob_from_chaos(value))
         log.info(f"Flute CHAOS={value:.2f}")
 
     elif sub == "density":
@@ -1061,18 +1091,17 @@ def _release_pid_lock() -> None:
 
 async def main() -> None:
     """OSCサーバーとWebSocketサーバーを同時に起動する。"""
-    global autonomous, chaos_engine, tidal, sequencer, turing_gene, markov
+    global autonomous, controller, tidal, sequencer, musical
 
     _acquire_pid_lock()
     await asyncio.sleep(0.8)  # 旧プロセスの終了を待つ（イベントループをブロックしない）
 
     autonomous = AutonomousMode(sc_client.send_message, broadcast)
-    chaos_engine = ChaosEngine(sc_client.send_message, broadcast)
     tidal = TidalController()
     autonomous.set_tidal(tidal)
     sequencer = TuringSequencer(sc_client.send_message, broadcast)
-    turing_gene = TuringGene(sc_client.send_message, broadcast)
-    markov = MarkovTimescale(chaos_engine, broadcast, tidal_controller=tidal)
+    controller = ThreeLayerController(_send_osc, broadcast, tidal_controller=tidal)
+    musical = MusicalControl(tidal, broadcast, lambda: controller._upper._state)
 
     disp = Dispatcher()
     disp.set_default_handler(on_osc_message)

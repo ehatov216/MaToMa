@@ -17,12 +17,19 @@ log = logging.getLogger(__name__)
 
 SCENES_FILE = Path(__file__).parent / "scenes.json"
 
+# モジュールロード時に一度だけ読み込むキャッシュ
+_SCENES_CACHE: list[dict] | None = None
+
 
 def load_scenes() -> list[dict]:
-    """scenes.json からシーン一覧を読み込む。"""
+    """scenes.json からシーン一覧を読み込む（初回のみI/O、以降はキャッシュを返す）。"""
+    global _SCENES_CACHE
+    if _SCENES_CACHE is not None:
+        return _SCENES_CACHE
     try:
         with open(SCENES_FILE, encoding="utf-8") as f:
-            return json.load(f)
+            _SCENES_CACHE = json.load(f)
+            return _SCENES_CACHE
     except FileNotFoundError:
         log.error(f"scenes.json が見つかりません: {SCENES_FILE}")
         return []

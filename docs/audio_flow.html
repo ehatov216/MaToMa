@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>MaToMa Audio Flow</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a0f;
+      color: #c8c8d8;
+      font-family: 'SF Mono', 'Fira Mono', 'Courier New', monospace;
+      font-size: 12px;
+      padding: 32px 24px;
+      min-width: 960px;
+    }
+
+    h1 {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #e8e8f4;
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      font-size: 11px;
+      color: #555570;
+      letter-spacing: 0.08em;
+      margin-bottom: 36px;
+    }
+
+    /* ─── Layout grid ─────────────────────────────────── */
+    .flow {
+      display: grid;
+      grid-template-columns: 180px 1fr 180px;
+      grid-template-rows: auto auto auto auto auto;
+      gap: 0;
+      position: relative;
+    }
+
+    /* ─── Section labels ──────────────────────────────── */
+    .layer-label {
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      transform: rotate(180deg);
+      font-size: 9px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #3a3a55;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 0;
+      border-right: 1px solid #1e1e2e;
+    }
+
+    /* ─── Box styles ──────────────────────────────────── */
+    .box {
+      border: 1px solid;
+      border-radius: 5px;
+      padding: 8px 12px;
+      text-align: center;
+      line-height: 1.55;
+      position: relative;
+    }
+
+    .box .name {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      display: block;
+    }
+
+    .box .detail {
+      font-size: 10px;
+      color: #7070a0;
+      display: block;
+      margin-top: 2px;
+    }
+
+    /* Color themes per layer */
+    .box-python {
+      background: #0f0f1e;
+      border-color: #2d2d52;
+      color: #9090c8;
+    }
+
+    .box-drone {
+      background: #0d1220;
+      border-color: #1e3a60;
+      color: #6aabf0;
+    }
+
+    .box-granular {
+      background: #0d1a14;
+      border-color: #1e5232;
+      color: #5ee68a;
+    }
+
+    .box-fm {
+      background: #1a100d;
+      border-color: #522a1e;
+      color: #e08050;
+    }
+
+    .box-spectral {
+      background: #150d1a;
+      border-color: #3d1e52;
+      color: #b070e0;
+    }
+
+    .box-perc {
+      background: #1a1508;
+      border-color: #523a10;
+      color: #d0a040;
+    }
+
+    .box-bus {
+      background: #0f1010;
+      border-color: #1e3030;
+      color: #50b0b0;
+    }
+
+    .box-coupling {
+      background: #0f150d;
+      border-color: #2a4520;
+      color: #80c060;
+    }
+
+    .box-effect {
+      background: #120f18;
+      border-color: #3a2a50;
+      color: #c080f0;
+    }
+
+    .box-out {
+      background: #141008;
+      border-color: #503a10;
+      color: #f0c040;
+    }
+
+    /* ─── Row containers ──────────────────────────────── */
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 0 10px 16px;
+      border-bottom: 1px solid #111118;
+      grid-column: 2 / 3;
+    }
+
+    .row-title {
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #333350;
+      white-space: nowrap;
+      min-width: 68px;
+    }
+
+    .row-items {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      flex: 1;
+    }
+
+    /* ─── Arrow connectors ────────────────────────────── */
+    .arrow {
+      font-size: 16px;
+      color: #2a2a45;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+
+    .arrow-organic {
+      color: #2a4520;
+    }
+
+    .arrow-coupling {
+      color: #1e3a28;
+      font-size: 13px;
+    }
+
+    /* ─── Bus row ─────────────────────────────────────── */
+    .bus-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      padding: 8px 0 8px 16px;
+      background: #0a0a10;
+      border-top: 1px solid #1a1a28;
+      border-bottom: 1px solid #1a1a28;
+      grid-column: 2 / 3;
+    }
+
+    /* ─── Organic coupling annotation ───────────────── */
+    .annotation {
+      font-size: 10px;
+      color: #40805a;
+      padding: 4px 10px;
+      border: 1px dashed #2a4a38;
+      border-radius: 4px;
+      line-height: 1.5;
+    }
+
+    /* ─── Scene coupling table ────────────────────────── */
+    .scene-table {
+      grid-column: 3 / 4;
+      padding: 0 0 0 20px;
+      align-self: start;
+    }
+
+    .scene-table table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+
+    .scene-table caption {
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #333350;
+      text-align: left;
+      padding-bottom: 6px;
+    }
+
+    .scene-table td, .scene-table th {
+      padding: 4px 8px;
+      font-size: 10px;
+      border-bottom: 1px solid #151520;
+      white-space: nowrap;
+    }
+
+    .scene-table th {
+      color: #444464;
+      font-weight: 400;
+    }
+
+    .bar {
+      display: inline-block;
+      height: 8px;
+      background: #2a5a38;
+      border-radius: 2px;
+      vertical-align: middle;
+    }
+
+    .bar-0  { width: 0; }
+    .bar-35 { width: 42px; }
+    .bar-70 { width: 84px; }
+    .bar-90 { width: 108px; }
+
+    /* ─── Vertical wire overlay (SVG) ─────────────────── */
+    .wire-col {
+      grid-column: 2 / 3;
+      position: relative;
+      height: 0;
+      overflow: visible;
+    }
+
+    /* ─── Legend ──────────────────────────────────────── */
+    .legend {
+      margin-top: 28px;
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      color: #5050708;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      border: 1.5px solid;
+      flex-shrink: 0;
+    }
+
+    /* ─── Full-width rows ─────────────────────────────── */
+    .full-row {
+      grid-column: 1 / 4;
+      display: flex;
+      align-items: flex-start;
+    }
+
+    .full-row .left-label {
+      width: 180px;
+      flex-shrink: 0;
+    }
+
+    .full-row .right-panel {
+      flex: 1;
+      padding: 0 0 0 16px;
+    }
+
+    /* source grid */
+    .sources-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .source-box {
+      border: 1px solid;
+      border-radius: 5px;
+      padding: 8px 10px;
+      text-align: center;
+    }
+
+    .source-box .sname {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      display: block;
+    }
+
+    .source-box .sdetail {
+      font-size: 9.5px;
+      color: #606080;
+      display: block;
+      margin-top: 3px;
+      line-height: 1.4;
+    }
+
+    .section-block {
+      padding: 12px 0;
+      border-bottom: 1px solid #111118;
+    }
+
+    .section-header {
+      font-size: 9px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #333350;
+      margin-bottom: 10px;
+    }
+
+    .flex-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .connector {
+      font-size: 18px;
+      color: #252538;
+      flex-shrink: 0;
+    }
+
+    .connector-organic { color: #253a20; }
+    .connector-control { color: #302030; }
+
+    .osc-label {
+      font-size: 9px;
+      color: #444464;
+      letter-spacing: 0.08em;
+      background: #0c0c16;
+      border: 1px solid #1e1e32;
+      border-radius: 3px;
+      padding: 2px 6px;
+    }
+
+    .tag {
+      display: inline-block;
+      font-size: 9px;
+      border-radius: 3px;
+      padding: 1px 5px;
+      margin-left: 4px;
+      vertical-align: middle;
+    }
+
+    .tag-new {
+      background: #1a3a20;
+      color: #60b070;
+      border: 1px solid #2a5a30;
+    }
+
+    .tag-layer {
+      background: #1a1a30;
+      color: #7070c0;
+      border: 1px solid #2a2a50;
+    }
+
+    /* ─── Per-layer color shortcuts ─── */
+    .col-drone    { color: #6aabf0; }
+    .col-granular { color: #5ee68a; }
+    .col-fm       { color: #e08050; }
+    .col-spectral { color: #b070e0; }
+    .col-perc     { color: #d0a040; }
+    .col-effect   { color: #c080f0; }
+    .col-out      { color: #f0c040; }
+    .col-bus      { color: #50b0b0; }
+    .col-coupling { color: #80c060; }
+    .col-python   { color: #9090c8; }
+  </style>
+</head>
+<body>
+
+<h1>MaToMa · Audio Flow</h1>
+<p class="subtitle">音響合成 → バス → エフェクト → Audio Out &nbsp;/&nbsp; updated 2026-03-31</p>
+
+<div style="display:grid; grid-template-columns:180px 1fr 200px; gap:0;">
+
+  <!-- ══════════════════════════════════════════════════
+       ROW 0 — PYTHON CONTROL LAYER
+  ══════════════════════════════════════════════════ -->
+  <div class="layer-label">Python / Control</div>
+
+  <div class="section-block" style="padding-left:16px;">
+    <div class="section-header">Python 制御レイヤー</div>
+    <div class="flex-row">
+      <div class="box box-python" style="min-width:120px;">
+        <span class="name">ChaosEngine</span>
+        <span class="detail">パラメーターをゆるやかに<br>ドリフトさせる自律エンジン</span>
+      </div>
+      <div class="box box-python" style="min-width:120px;">
+        <span class="name">TuringMachine</span>
+        <span class="detail">16ステップ確率シーケンサー<br>mutation_prob / trig_prob</span>
+      </div>
+      <div class="box box-python" style="min-width:120px;">
+        <span class="name">Scenes</span>
+        <span class="detail">引力点ベースのプリセット<br>深淵 / 浮遊 / 緊張 / 崩壊</span>
+      </div>
+      <span class="connector connector-control">↓</span>
+      <span class="osc-label">OSC UDP:57200</span>
+    </div>
+  </div>
+
+  <div></div><!-- right column placeholder -->
+
+  <!-- ══════════════════════════════════════════════════
+       ROW 1 — SYNTHESIS SOURCES
+  ══════════════════════════════════════════════════ -->
+  <div class="layer-label">Synthesis Sources</div>
+
+  <div class="section-block" style="padding-left:16px;">
+    <div class="section-header">音源レイヤー</div>
+    <div class="sources-grid">
+
+      <!-- Drone -->
+      <div class="source-box" style="background:#0d1220;border-color:#1e3a60;">
+        <span class="sname col-drone">Drone</span>
+        <span class="sdetail">matoma_drone v3<br>Klank×6 + AllpassC<br>PitchShift Shimmer<br>GVerb (12s)</span>
+      </div>
+
+      <!-- Granular -->
+      <div class="source-box" style="background:#0d1a14;border-color:#1e5232;">
+        <span class="sname col-granular">Granular<span class="tag tag-new">★ Organic</span></span>
+        <span class="sdetail">RecordBuf → GrainBuf<br>density / spray / pos<br>Layer A2: heart 0.25Hz<br>Layer A3: neural 3Hz</span>
+      </div>
+
+      <!-- FM Synth -->
+      <div class="source-box" style="background:#1a100d;border-color:#522a1e;">
+        <span class="sname col-fm">FM Synth</span>
+        <span class="sdetail">matoma_basic<br>mod1(整数) + mod2(非整数)<br>SinOscFB → RLPF<br>FreeVerb2</span>
+      </div>
+
+      <!-- Spectral -->
+      <div class="source-box" style="background:#150d1a;border-color:#3d1e52;">
+        <span class="sname col-spectral">Spectral</span>
+        <span class="sdetail">PV_MagSmear<br>PV_Diffuser<br>周波数成分のぼかし<br>位相ランダム化</span>
+      </div>
+
+      <!-- Percussion -->
+      <div class="source-box" style="background:#1a1508;border-color:#523a10;">
+        <span class="sname col-perc">Percussion</span>
+        <span class="sdetail">Kick / Snare / HiHat<br>Clap (Klank非整数倍音)<br>Turing Machine trigger<br>22 OSCdefs</span>
+      </div>
+
+    </div>
+
+    <!-- Organic Coupling Flow -->
+    <div class="flex-row" style="margin-top:4px; align-items:flex-start;">
+      <div class="annotation" style="flex:1;">
+        <span style="color:#80c060; font-weight:700;">Organic Coupling</span>
+        <span class="tag tag-new">NEW 2026-03-30</span><br>
+        Drone → <span class="col-bus">~droneBus</span> →
+        <span style="color:#80c060;">matoma_analyser</span>
+        (低域/高域比 = brightness) →
+        <span class="col-bus">~centroidBus</span><br>
+        Granular: <code>density = density × (1−coupling) + organic_density × coupling</code><br>
+        coupling 0=独立 / 1=完全オーガニック &nbsp;→&nbsp; <span class="col-bus">~couplingBus</span>で実時間制御
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: Scene coupling table -->
+  <div style="padding-left:20px; padding-top:12px;">
+    <table style="border-collapse:collapse; width:100%;">
+      <caption style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#333350;text-align:left;padding-bottom:6px;">シーン別 coupling</caption>
+      <thead>
+        <tr>
+          <th style="font-size:10px;color:#444464;font-weight:400;padding:3px 6px;border-bottom:1px solid #151520;text-align:left;">シーン</th>
+          <th style="font-size:10px;color:#444464;font-weight:400;padding:3px 6px;border-bottom:1px solid #151520;"></th>
+          <th style="font-size:10px;color:#444464;font-weight:400;padding:3px 6px;border-bottom:1px solid #151520;text-align:right;">値</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="padding:4px 6px;font-size:10px;border-bottom:1px solid #111118;color:#5080a8;">深淵</td>
+          <td style="padding:4px 6px;"><span style="display:inline-block;height:7px;width:0px;background:#2a5a38;border-radius:2px;"></span></td>
+          <td style="padding:4px 6px;font-size:10px;border-bottom:1px solid #111118;text-align:right;color:#505070;">0.0</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 6px;font-size:10px;border-bottom:1px solid #111118;color:#50a870;">浮遊</td>
+          <td style="padding:4px 6px;"><span style="display:inline-block;height:7px;width:42px;background:#2a5a38;border-radius:2px;"></span></td>
+          <td style="padding:4px 6px;font-size:10px;border-bottom:1px solid #111118;text-align:right;color:#70a870;">0.35</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 6px;font-size:10px;border-bottom:1px solid #111118;color:#c0a050;">緊張</td>
+          <td style="padding:4px 6px;"><span style="display:inline-block;height:7px;width:84px;background:#3a7a48;border-radius:2px;"></span></td>
+          <td style="padding:4px 6px;font-size:10px;border-bottom:1px solid #111118;text-align:right;color:#90c070;">0.7</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 6px;font-size:10px;color:#d04040;">崩壊</td>
+          <td style="padding:4px 6px;"><span style="display:inline-block;height:7px;width:108px;background:#4a9a58;border-radius:2px;"></span></td>
+          <td style="padding:4px 6px;font-size:10px;text-align:right;color:#a0e080;">0.9</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       ROW 2 — SHARED BUSES
+  ══════════════════════════════════════════════════ -->
+  <div class="layer-label" style="background:#0a0a10;">Shared Buses</div>
+
+  <div class="section-block" style="padding-left:16px; background:#08080e;">
+    <div class="section-header">共有バス</div>
+    <div class="flex-row">
+
+      <div class="box box-bus" style="min-width:140px;">
+        <span class="name">~droneBus</span>
+        <span class="detail">Bus.audio(s, 2)<br>Drone → Granular 素材</span>
+      </div>
+
+      <div class="box box-bus" style="min-width:160px;">
+        <span class="name">~effectBus</span>
+        <span class="detail">Bus.audio(s, 2)<br>全音源 → グローバルエフェクト</span>
+      </div>
+
+      <div class="box box-coupling" style="min-width:140px;">
+        <span class="name">~centroidBus<span class="tag tag-new">NEW</span></span>
+        <span class="detail">Bus.control(s, 1)<br>ドローン明るさ 0〜1</span>
+      </div>
+
+      <div class="box box-coupling" style="min-width:140px;">
+        <span class="name">~couplingBus<span class="tag tag-new">NEW</span></span>
+        <span class="detail">Bus.control(s, 1)<br>連動強度 0=独立〜1=オーガニック</span>
+      </div>
+
+    </div>
+  </div>
+
+  <div></div>
+
+  <!-- ══════════════════════════════════════════════════
+       ROW 3 — EFFECTS CHAIN
+  ══════════════════════════════════════════════════ -->
+  <div class="layer-label">Effects Chain</div>
+
+  <div class="section-block" style="padding-left:16px;">
+    <div class="section-header">グローバルエフェクトチェーン （effects.scd）</div>
+    <div class="flex-row">
+
+      <div class="box box-effect" style="min-width:130px;">
+        <span class="name">~effectBus</span>
+        <span class="detail">In.ar(~effectBus)</span>
+      </div>
+
+      <span class="connector">→</span>
+
+      <div class="box box-effect" style="min-width:140px;">
+        <span class="name">matoma_effect_out</span>
+        <span class="detail">GVerb + JPverb<br>Compressor / Limiter<br>マスタリング処理</span>
+      </div>
+
+      <span class="connector">→</span>
+
+      <div class="box box-effect" style="min-width:130px;">
+        <span class="name">Spectral FX</span>
+        <span class="detail">PV_MagSmear<br>PV_Diffuser<br>(オプション挿入)</span>
+      </div>
+
+      <span class="connector">→</span>
+
+      <div class="box box-out" style="min-width:130px;">
+        <span class="name">Out.ar(0)</span>
+        <span class="detail">Hardware Output<br>s.options.outDevice<br>（audio_device.txt より）</span>
+      </div>
+
+    </div>
+  </div>
+
+  <div></div>
+
+  <!-- ══════════════════════════════════════════════════
+       ROW 4 — AUDIO OUT
+  ══════════════════════════════════════════════════ -->
+  <div class="layer-label">Hardware Out</div>
+
+  <div class="section-block" style="padding-left:16px; background:#0c0c08;">
+    <div class="section-header">オーディオ出力</div>
+    <div class="flex-row">
+
+      <div class="box box-out" style="min-width:180px;">
+        <span class="name col-out">🔊 Audio Interface / DAC</span>
+        <span class="detail">scsynth outDevice のみ変更<br>macOSシステム出力は変更しない<br>→ Spotify 等の他アプリへの影響なし</span>
+      </div>
+
+    </div>
+  </div>
+
+  <div></div>
+
+</div><!-- end main grid -->
+
+
+<!-- ══════════════════════════════════════════════════
+     SIGNAL PATH SUMMARY (Full width)
+══════════════════════════════════════════════════ -->
+<div style="margin-top:32px; border:1px solid #1a1a28; border-radius:6px; padding:18px 20px; background:#0c0c14;">
+  <div style="font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#333350;margin-bottom:14px;">Signal Path Summary</div>
+
+  <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:11px;">
+
+    <div style="background:#0d1220;border:1px solid #1e3a60;border-radius:4px;padding:5px 10px;color:#6aabf0;">Drone</div>
+    <span style="color:#2a2a40;font-size:14px;">─</span>
+    <span style="font-size:9px;color:#2a4a60;">→ ~droneBus</span>
+    <span style="color:#2a2a40;font-size:14px;">─</span>
+
+    <div style="background:#0f150d;border:1px solid #2a4520;border-radius:4px;padding:5px 10px;color:#80c060;">analyser<br><span style="font-size:9px;color:#406040;">brightness</span></div>
+    <span style="color:#253a20;font-size:14px;">→</span>
+    <div style="background:#0f1010;border:1px solid #1e3030;border-radius:4px;padding:5px 10px;color:#50b0b0;">~centroidBus</div>
+    <span style="color:#253a20;font-size:14px;">→</span>
+
+    <div style="background:#0d1a14;border:1px solid #1e5232;border-radius:4px;padding:5px 10px;color:#5ee68a;">Granular<br><span style="font-size:9px;color:#407050;">density blend</span></div>
+
+    <span style="color:#2a2a40;font-size:18px;">│</span>
+
+    <div style="background:#1a100d;border:1px solid #522a1e;border-radius:4px;padding:5px 10px;color:#e08050;">FM</div>
+    <div style="background:#150d1a;border:1px solid #3d1e52;border-radius:4px;padding:5px 10px;color:#b070e0;">Spectral</div>
+    <div style="background:#1a1508;border:1px solid #523a10;border-radius:4px;padding:5px 10px;color:#d0a040;">Perc</div>
+
+    <span style="color:#2a2a40;font-size:14px;">─</span>
+    <span style="font-size:9px;color:#2a2a45;">→ ~effectBus</span>
+    <span style="color:#2a2a40;font-size:14px;">─</span>
+
+    <div style="background:#120f18;border:1px solid #3a2a50;border-radius:4px;padding:5px 10px;color:#c080f0;">Effects<br><span style="font-size:9px;color:#805098;">GVerb/Limiter</span></div>
+
+    <span style="color:#2a2a40;font-size:18px;">→</span>
+
+    <div style="background:#141008;border:1px solid #503a10;border-radius:4px;padding:5px 10px;color:#f0c040;">🔊 Out</div>
+
+  </div>
+
+  <!-- Coupling control path -->
+  <div style="margin-top:14px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:11px;">
+    <span style="font-size:9px;color:#333350;min-width:100px;">Coupling control:</span>
+    <div style="background:#0f0f1e;border:1px solid #2d2d52;border-radius:4px;padding:5px 10px;color:#9090c8;">Scenes.py<br><span style="font-size:9px;color:#606090;">organic_coupling</span></div>
+    <span style="font-size:9px;color:#2a3048;">→ OSC /matoma/coupling →</span>
+    <div style="background:#0f1010;border:1px solid #1e3030;border-radius:4px;padding:5px 10px;color:#50b0b0;">~couplingBus</div>
+    <span style="font-size:9px;color:#2a3a28;">→ Granular blend weight</span>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════
+     LEGEND
+══════════════════════════════════════════════════ -->
+<div style="margin-top:24px; display:flex; gap:20px; flex-wrap:wrap; font-size:10px; color:#404060;">
+  <div style="display:flex;align-items:center;gap:6px;"><span style="width:10px;height:10px;border-radius:50%;border:1.5px solid #1e3a60;display:inline-block;"></span> Drone (blue)</div>
+  <div style="display:flex;align-items:center;gap:6px;"><span style="width:10px;height:10px;border-radius:50%;border:1.5px solid #1e5232;display:inline-block;"></span> Granular (green)</div>
+  <div style="display:flex;align-items:center;gap:6px;"><span style="width:10px;height:10px;border-radius:50%;border:1.5px solid #522a1e;display:inline-block;"></span> FM (orange)</div>
+  <div style="display:flex;align-items:center;gap:6px;"><span style="width:10px;height:10px;border-radius:50%;border:1.5px solid #3d1e52;display:inline-block;"></span> Spectral (purple)</div>
+  <div style="display:flex;align-items:center;gap:6px;"><span style="width:10px;height:10px;border-radius:50%;border:1.5px solid #523a10;display:inline-block;"></span> Percussion (yellow)</div>
+  <div style="display:flex;align-items:center;gap:6px;"><span style="width:10px;height:10px;border-radius:50%;border:1.5px solid #2a4520;display:inline-block;"></span> Organic Coupling (★NEW)</div>
+  <div style="display:flex;align-items:center;gap:6px;"><span style="width:10px;height:10px;border-radius:50%;border:1.5px solid #2d2d52;display:inline-block;"></span> Python / Control</div>
+</div>
+
+</body>
+</html>

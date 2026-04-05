@@ -1,0 +1,1764 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>MaToMa</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#070709;--bg2:#0d0d12;--bg3:#121218;--border:#1c1c26;
+  --text:#b8b8cc;--dim:#44445a;--bright:#e0e0f0;
+  --c-scene:#4ade80;--c-drone:#60a5fa;--c-gran:#fb923c;
+  --c-rhythmic:#f43f5e;--c-effect:#e879f9;--c-chaos:#a78bfa;
+  --c-auto:#a78bfa;--c-warn:#fbbf24;
+  --c-dronegen:#38bdf8;
+}
+body{background:var(--bg);color:var(--text);font-family:'SF Mono','Fira Code',monospace;font-size:12px;min-height:100vh}
+
+/* HEADER */
+#hdr{position:sticky;top:0;z-index:200;background:var(--bg2);border-bottom:1px solid var(--border);
+  padding:.45rem .8rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+#title{font-size:1rem;font-weight:bold;color:#fff;letter-spacing:.2em}
+.dot{width:7px;height:7px;border-radius:50%;background:#222;flex-shrink:0}
+.dot.on  {background:var(--c-scene);box-shadow:0 0 5px var(--c-scene)}
+.dot.warn{background:var(--c-warn);box-shadow:0 0 5px var(--c-warn)}
+.dot.err {background:#f87171;box-shadow:0 0 5px #f87171}
+#sc-label{font-size:.68rem;color:var(--dim)}
+#mode-btns{display:flex;gap:.35rem;margin-left:auto}
+.mode-btn{padding:.3rem .8rem;font-family:inherit;font-size:.7rem;letter-spacing:.1em;
+  border-radius:3px;border:1px solid var(--border);background:transparent;
+  color:var(--dim);cursor:pointer;transition:all .15s;min-height:28px}
+.mode-btn.active-chaos{border-color:var(--c-auto);color:var(--c-auto);background:#13101a}
+.mode-btn.active-ctrl {border-color:var(--c-scene);color:var(--c-scene);background:#0b180e}
+
+/* LAYOUT */
+#console{padding:.5rem;display:grid;grid-template-columns:160px 1fr;gap:.5rem}
+#left-col{display:flex;flex-direction:column;gap:.5rem}
+#right-col{display:flex;flex-direction:column;gap:.5rem}
+
+/* MODULE */
+.mod{background:var(--bg2);border:1px solid var(--border);border-radius:4px;overflow:hidden}
+.mhdr{display:flex;align-items:center;gap:.4rem;padding:.32rem .6rem;border-bottom:1px solid var(--border)}
+.mbar{width:3px;height:13px;border-radius:2px;flex-shrink:0}
+.mname{font-size:.65rem;font-weight:bold;letter-spacing:.14em;color:var(--bright)}
+.mbody{padding:.55rem .6rem}
+
+/* SCENE BUTTONS (left column) */
+.scene-list{display:flex;flex-direction:column;gap:.35rem}
+.scbtn{width:100%;padding:.65rem .4rem;font-family:inherit;font-size:.95rem;font-weight:bold;
+  border-radius:4px;border:1px solid var(--border);background:var(--bg3);
+  color:var(--dim);cursor:pointer;text-align:center;transition:all .13s;letter-spacing:.05em}
+.scbtn:hover{background:#1a1a28;color:var(--text)}
+.scbtn.on{border-color:var(--c-scene);color:var(--c-scene);background:#0b180e;
+  box-shadow:0 0 10px rgba(74,222,128,.15)}
+.scene-hint{font-size:.58rem;color:var(--dim);text-align:center;margin-top:.2rem;line-height:1.4}
+
+/* CHAOS STATE PANEL */
+#chaos-panel{flex:1}
+.chaos-row{margin-bottom:.35rem}
+.chaos-row:last-child{margin-bottom:0}
+.chaos-row-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:.18rem}
+.chaos-label{font-size:.6rem;color:var(--dim);line-height:1.2}
+.chaos-label b{color:var(--bright);font-weight:normal}
+.chaos-bar-wrap{position:relative;height:5px;background:var(--bg3);border-radius:3px;overflow:visible;border:1px solid var(--border)}
+.chaos-bar{height:100%;border-radius:3px;transition:width .4s ease;background:var(--c-auto);position:relative;z-index:2}
+.chaos-bar.drone  {background:var(--c-drone)}
+.chaos-bar.granular{background:var(--c-gran)}
+.chaos-bar.rhythmic{background:var(--c-rhythmic)}
+/* 引力点±rangeの範囲を示す半透明の背景 */
+.chaos-range-bg{position:absolute;top:0;height:100%;border-radius:3px;opacity:.22;transition:left .6s ease,width .6s ease;z-index:1}
+.chaos-range-bg.drone   {background:var(--c-drone)}
+.chaos-range-bg.granular{background:var(--c-gran)}
+.chaos-range-bg.rhythmic{background:var(--c-rhythmic)}
+/* 引力点の位置を示す縦線マーカー */
+.chaos-attractor{position:absolute;top:-1px;width:2px;height:calc(100% + 2px);background:#fff;opacity:.55;border-radius:1px;transition:left .6s ease;z-index:3;pointer-events:none}
+.chaos-val{font-size:.58rem;color:var(--c-warn);font-variant-numeric:tabular-nums}
+.chaos-section-label{font-size:.57rem;letter-spacing:.14em;color:var(--dim);margin-bottom:.3rem;margin-top:.35rem}
+.chaos-section-label:first-child{margin-top:0}
+@keyframes chaos-pulse{0%,100%{opacity:.6}50%{opacity:1}}
+.chaos-running .chaos-bar{animation:chaos-pulse 2s ease-in-out infinite}
+
+/* PARAM ROWS (sliders) */
+.pr{display:grid;grid-template-columns:80px 1fr 40px;align-items:center;gap:.35rem;margin-bottom:.38rem}
+.pr:last-child{margin-bottom:0}
+.pl{font-size:.6rem;color:var(--dim);line-height:1.3}
+.pl b{display:block;color:var(--text);font-weight:normal;font-size:.62rem}
+input[type=range]{width:100%;height:2px;cursor:pointer;-webkit-appearance:none;appearance:none;
+  background:var(--border);border-radius:2px;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;
+  border-radius:50%;background:var(--thumb,#4ade80);cursor:pointer}
+input[type=range].disabled-slider{opacity:.3;pointer-events:none}
+.pv{font-size:.6rem;color:var(--c-warn);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+
+/* BUTTONS */
+.btn-row{display:flex;gap:.3rem;margin-bottom:.38rem}
+.btn-row:last-child{margin-bottom:0}
+.tb{flex:1;padding:.38rem .3rem;font-family:inherit;font-size:.68rem;letter-spacing:.04em;
+  border-radius:3px;border:1px solid var(--border);background:transparent;color:var(--dim);
+  cursor:pointer;text-align:center;transition:all .12s;min-height:28px}
+.tb:hover{background:var(--bg3);color:var(--text)}
+.tb.on {background:#0d1a12;border-color:var(--c-scene);color:var(--c-scene)}
+.tb.off{background:#1a0d0d;border-color:#7f3333;color:#f87171}
+.tb.hi {background:#13101a;border-color:var(--c-auto);color:var(--c-auto)}
+.tb.act{background:#1a0e24;border-color:var(--c-effect);color:var(--c-effect)}
+
+/* SECTION DIVIDERS */
+.sep{border:none;border-top:1px solid var(--border);margin:.4rem 0}
+.sec{font-size:.57rem;letter-spacing:.14em;color:var(--dim);margin-bottom:.32rem}
+
+/* SOURCE SELECTOR (Rhythmic) */
+.src-grid{display:flex;flex-wrap:wrap;gap:.25rem;margin-bottom:.38rem}
+.src-btn{padding:.28rem .45rem;font-family:inherit;font-size:.6rem;letter-spacing:.05em;
+  border-radius:3px;border:1px solid var(--border);background:transparent;
+  color:var(--dim);cursor:pointer;transition:all .1s}
+.src-btn:hover{color:var(--text);background:var(--bg3)}
+.src-btn.on{border-color:var(--c-rhythmic);color:var(--c-rhythmic);background:#1a0c10}
+
+/* EFFECT LAYER */
+#effect-layer{border-color:#2a1a2e}
+#effect-layer .mhdr{border-bottom-color:#2a1a2e;background:rgba(232,121,249,.03)}
+#effect-layer .mbar{background:var(--c-effect)}
+#effect-layer .mname{color:var(--c-effect)}
+.effect-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem}
+.effect-module{background:var(--bg3);border:1px solid #2a1a2e;border-radius:3px;padding:.45rem}
+.effect-title{font-size:.57rem;letter-spacing:.12em;color:var(--c-effect);margin-bottom:.35rem}
+
+/* PERCUSSION SEQUENCER */
+#perc-layer{border-color:#2a1018}
+#perc-layer .mhdr{border-bottom-color:#2a1018;background:rgba(244,63,94,.03)}
+#perc-layer .mbar{background:var(--c-drums)}
+#perc-layer .mname{color:var(--c-drums)}
+.perc-controls{display:flex;align-items:center;gap:.6rem;margin-bottom:.55rem;flex-wrap:wrap}
+.perc-btn{padding:.35rem .7rem;font-family:inherit;font-size:.68rem;letter-spacing:.06em;
+  border-radius:3px;border:1px solid var(--border);background:transparent;
+  color:var(--dim);cursor:pointer;transition:all .12s;min-height:28px}
+.perc-btn:hover{background:var(--bg3);color:var(--text)}
+.perc-btn.start-on{border-color:var(--c-drums);color:var(--c-drums);background:#1a0410}
+.perc-btn.mode-on{border-color:var(--c-chaos);color:var(--c-chaos);background:#13101a}
+.perc-btn.rev-on{border-color:var(--c-warn);color:var(--c-warn);background:#1a150a}
+.perc-ctrl-group{display:flex;align-items:center;gap:.4rem}
+.perc-ctrl-label{font-size:.6rem;color:var(--dim);white-space:nowrap}
+.perc-ctrl-val{font-size:.6rem;color:var(--c-warn);min-width:34px;text-align:right;
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+input[type=range].perc-slider{width:80px;height:2px;cursor:pointer;-webkit-appearance:none;
+  appearance:none;background:var(--border);border-radius:2px;outline:none}
+input[type=range].perc-slider::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;
+  border-radius:50%;background:var(--c-drums);cursor:pointer}
+.perc-grid{display:flex;flex-direction:column;gap:.32rem}
+.perc-row{display:flex;align-items:center;gap:0}
+.perc-track-name{width:52px;font-size:.6rem;letter-spacing:.08em;color:var(--dim);
+  flex-shrink:0;text-transform:uppercase}
+.perc-steps{display:flex;gap:2px}
+.perc-beat-group{display:flex;gap:2px;padding-right:6px}
+.perc-beat-group:last-child{padding-right:0}
+.perc-pad{width:20px;height:20px;border-radius:2px;border:1px solid #1e1e2a;
+  background:var(--bg3);cursor:pointer;transition:background .07s,border-color .07s,opacity .07s;
+  flex-shrink:0;position:relative}
+.perc-pad.on{background:var(--c-drums);border-color:#f85f77;
+  box-shadow:0 0 6px rgba(244,63,94,.5)}
+.perc-pad.playhead{border-color:#444460}
+.perc-pad.on.playhead{box-shadow:0 0 8px rgba(244,63,94,.8),0 0 2px #fff}
+/* 列ハイライト（プレイヘッド） */
+.perc-col-highlight{background:#181824 !important;border-color:#2a2a40 !important}
+/* CHAOSモード: パッド上の確率値テキスト */
+.perc-chaos-pad{font-size:8px;color:#fff;display:flex;align-items:center;justify-content:center}
+/* トラック行末のRAND/EUCLIDコントロール */
+.perc-row-controls{display:flex;align-items:center;gap:.3rem;margin-left:.5rem;flex-shrink:0}
+.perc-row-ctrl-btn{padding:.15rem .35rem;font-size:.58rem;cursor:pointer;border:1px solid var(--border);
+  background:transparent;color:var(--dim);border-radius:2px;font-family:inherit;min-height:22px}
+.perc-row-ctrl-btn:hover{color:var(--c-drums);border-color:var(--c-drums)}
+input[type=range].perc-mini-slider{width:55px;height:2px;cursor:pointer;-webkit-appearance:none;
+  appearance:none;background:var(--border);border-radius:2px;outline:none}
+input[type=range].perc-mini-slider::-webkit-slider-thumb{-webkit-appearance:none;width:8px;height:8px;
+  border-radius:50%;background:var(--c-drums);cursor:pointer}
+/* CHAOS ENGINE (percussion sub-section) */
+.perc-chaos-section{margin-top:.6rem;border-top:1px solid #2a1018;padding-top:.5rem}
+.perc-chaos-header{font-size:.58rem;letter-spacing:.15em;color:rgba(244,63,94,.6);margin-bottom:.4rem}
+.perc-chaos-controls{display:flex;gap:.3rem;margin-bottom:.4rem}
+.perc-chaos-params{display:flex;flex-direction:column;gap:.3rem}
+.perc-chaos-row{display:flex;align-items:center;gap:.5rem}
+.perc-chaos-label{font-size:.6rem;color:var(--dim);width:55px}
+.perc-chaos-val{font-size:.6rem;color:var(--c-drums);min-width:45px;text-align:right;font-variant-numeric:tabular-nums}
+.perc-rev-btn{padding:.12rem .35rem;font-size:.58rem;border:1px solid var(--border);background:transparent;color:var(--dim);border-radius:2px;cursor:pointer;font-family:inherit}
+.perc-rev-btn.on{border-color:var(--c-drums);color:var(--c-drums);background:#1a0410}
+
+/* DRONE GENERATORS */
+#dronegen-layer{border-color:#0a2030}
+#dronegen-layer .mhdr{border-bottom-color:#0a2030;background:rgba(56,189,248,.03)}
+.dg-grid{display:flex;flex-direction:column;gap:.28rem}
+.dg-row{display:grid;grid-template-columns:44px 24px 24px 1fr 1fr 1fr;align-items:center;gap:.3rem;padding:.1rem 0}
+.dg-row + .dg-row{border-top:1px solid var(--border)}
+.dg-type-label{font-size:.62rem;font-weight:bold;letter-spacing:.06em;color:var(--c-dronegen);text-align:right;padding-right:.2rem}
+.dg-btn{padding:.15rem .22rem;font-family:inherit;font-size:.63rem;border-radius:2px;
+  border:1px solid var(--border);background:transparent;color:var(--dim);
+  cursor:pointer;min-height:22px;text-align:center;line-height:1}
+.dg-btn:hover{background:var(--bg3);color:var(--text)}
+.dg-btn.start-on{border-color:var(--c-dronegen);color:var(--c-dronegen);background:#04141e}
+.dg-stop-btn{border-color:#7f3333;color:#f87171}
+.dg-param{display:grid;grid-template-columns:28px 1fr 36px;align-items:center;gap:.18rem}
+.dg-label{font-size:.56rem;color:var(--dim);text-align:right;white-space:nowrap}
+input[type=range].dg-slider{width:100%;height:2px;cursor:pointer;-webkit-appearance:none;
+  appearance:none;background:var(--border);border-radius:2px;outline:none}
+input[type=range].dg-slider::-webkit-slider-thumb{-webkit-appearance:none;width:8px;height:8px;
+  border-radius:50%;background:var(--c-dronegen);cursor:pointer}
+.dg-val{font-size:.57rem;color:var(--c-warn);text-align:right;white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+
+/* LOG */
+#log-panel{background:var(--bg2);border:1px solid var(--border);border-radius:4px;overflow:hidden}
+#log-hdr{display:flex;align-items:center;gap:.4rem;padding:.28rem .6rem;
+  border-bottom:1px solid var(--border);cursor:pointer}
+#log-hdr:hover{background:var(--bg3)}
+#log-body{padding:.4rem .6rem;max-height:80px;overflow-y:auto}
+.le{display:flex;gap:.4rem;margin:.08rem 0;font-size:.6rem}
+.le .lt{color:#2a2a3a;flex-shrink:0}
+.le .la{color:var(--c-drone)}
+.le .lv{color:var(--c-warn)}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header id="hdr">
+  <div id="title">MaToMa</div>
+  <div class="dot" id="ws-dot" title="WebSocket"></div>
+  <div class="dot" id="sc-dot" title="SuperCollider"></div>
+  <span id="sc-label">SC: ...</span>
+  <div id="mode-btns">
+    <button class="mode-btn" id="btn-chaos-mode" onclick="setChaosMode()">自律モード</button>
+    <button class="mode-btn active-ctrl" id="btn-ctrl-mode" onclick="setCtrlMode()">制御モード</button>
+  </div>
+  <div style="display:flex;align-items:center;gap:.3rem;font-size:.65rem;margin-left:auto">
+    <span style="color:var(--dim);flex-shrink:0">OUT</span>
+    <select id="device-select" onchange="onDeviceSelectChange(this.value)"
+      title="音声出力デバイス"
+      style="background:var(--bg3);border:1px solid var(--border);color:var(--text);
+             font-family:inherit;font-size:.65rem;padding:.25rem .4rem;border-radius:3px;
+             cursor:pointer;max-width:170px;min-height:24px">
+      <option value="">— 読込中 —</option>
+    </select>
+  </div>
+  <div style="display:flex;gap:.4rem">
+    <button class="mode-btn" id="btn-test" style="border-color:#4ade80;color:#4ade80" onclick="testTone()" title="880Hzビープで音声経路を確認">♪ テスト</button>
+    <button class="mode-btn" style="border-color:#f87171;color:#f87171" onclick="stopAll()">■ 全停止</button>
+    <button class="mode-btn" id="btn-restart" style="border-color:#60a5fa;color:#60a5fa" onclick="restartAll()">↺ 再セットアップ</button>
+  </div>
+</header>
+
+<main id="console">
+
+  <!-- LEFT: SCENE -->
+  <div id="left-col">
+    <div class="mod">
+      <div class="mhdr">
+        <div class="mbar" style="background:var(--c-scene)"></div>
+        <div class="mname">SCENE</div>
+      </div>
+      <div class="mbody">
+        <div class="scene-list">
+          <button class="scbtn" id="scb-深淵" onclick="selectScene('深淵')">深淵</button>
+          <button class="scbtn" id="scb-浮遊" onclick="selectScene('浮遊')">浮遊</button>
+          <button class="scbtn" id="scb-緊張" onclick="selectScene('緊張')">緊張</button>
+          <button class="scbtn" id="scb-崩壊" onclick="selectScene('崩壊')">崩壊</button>
+        </div>
+        <div class="scene-hint">1-4 キーでも切替</div>
+      </div>
+    </div>
+
+    <!-- CHAOS STATE（可視化） -->
+    <div class="mod" id="chaos-panel">
+      <div class="mhdr">
+        <div class="mbar" style="background:var(--c-auto)"></div>
+        <div class="mname">CHAOS</div>
+        <span id="chaos-status" style="font-size:.58rem;color:var(--dim);margin-left:.2rem">停止</span>
+      </div>
+      <div class="mbody" id="chaos-body">
+        <div class="chaos-section-label">DRONE</div>
+
+        <div class="chaos-row">
+          <div class="chaos-row-top">
+            <div class="chaos-label"><b>freq</b></div>
+            <div class="chaos-val" id="cv-drone-freq">41</div>
+          </div>
+          <div class="chaos-bar-wrap">
+            <div class="chaos-range-bg drone"  id="crng-drone-freq"></div>
+            <div class="chaos-bar drone" id="cb-drone-freq" style="width:30%"></div>
+            <div class="chaos-attractor"        id="ca-drone-freq" style="left:30%"></div>
+          </div>
+        </div>
+        <div class="chaos-row">
+          <div class="chaos-row-top">
+            <div class="chaos-label"><b>feedback</b></div>
+            <div class="chaos-val" id="cv-drone-feedback">.35</div>
+          </div>
+          <div class="chaos-bar-wrap">
+            <div class="chaos-range-bg drone"  id="crng-drone-feedback"></div>
+            <div class="chaos-bar drone" id="cb-drone-feedback" style="width:35%"></div>
+            <div class="chaos-attractor"        id="ca-drone-feedback" style="left:35%"></div>
+          </div>
+        </div>
+        <div class="chaos-row">
+          <div class="chaos-row-top">
+            <div class="chaos-label"><b>shimmer</b></div>
+            <div class="chaos-val" id="cv-drone-shimmer">.50</div>
+          </div>
+          <div class="chaos-bar-wrap">
+            <div class="chaos-range-bg drone"  id="crng-drone-shimmer"></div>
+            <div class="chaos-bar drone" id="cb-drone-shimmer" style="width:50%"></div>
+            <div class="chaos-attractor"        id="ca-drone-shimmer" style="left:50%"></div>
+          </div>
+        </div>
+        <div class="chaos-row">
+          <div class="chaos-row-top">
+            <div class="chaos-label"><b>room</b></div>
+            <div class="chaos-val" id="cv-drone-room">.92</div>
+          </div>
+          <div class="chaos-bar-wrap">
+            <div class="chaos-range-bg drone"  id="crng-drone-room"></div>
+            <div class="chaos-bar drone" id="cb-drone-room" style="width:92%"></div>
+            <div class="chaos-attractor"        id="ca-drone-room" style="left:92%"></div>
+          </div>
+        </div>
+
+        <div class="chaos-section-label">GRANULAR</div>
+
+        <div class="chaos-row">
+          <div class="chaos-row-top">
+            <div class="chaos-label"><b>density</b></div>
+            <div class="chaos-val" id="cv-gran-density">5</div>
+          </div>
+          <div class="chaos-bar-wrap">
+            <div class="chaos-range-bg granular" id="crng-gran-density"></div>
+            <div class="chaos-bar granular" id="cb-gran-density" style="width:10%"></div>
+            <div class="chaos-attractor"          id="ca-gran-density" style="left:10%"></div>
+          </div>
+        </div>
+        <div class="chaos-row">
+          <div class="chaos-row-top">
+            <div class="chaos-label"><b>spray</b></div>
+            <div class="chaos-val" id="cv-gran-spray">.30</div>
+          </div>
+          <div class="chaos-bar-wrap">
+            <div class="chaos-range-bg granular" id="crng-gran-spray"></div>
+            <div class="chaos-bar granular" id="cb-gran-spray" style="width:30%"></div>
+            <div class="chaos-attractor"          id="ca-gran-spray" style="left:30%"></div>
+          </div>
+        </div>
+        <div class="chaos-row">
+          <div class="chaos-row-top">
+            <div class="chaos-label"><b>pos</b></div>
+            <div class="chaos-val" id="cv-gran-pos">.50</div>
+          </div>
+          <div class="chaos-bar-wrap">
+            <div class="chaos-range-bg granular" id="crng-gran-pos"></div>
+            <div class="chaos-bar granular" id="cb-gran-pos" style="width:50%"></div>
+            <div class="chaos-attractor"          id="ca-gran-pos" style="left:50%"></div>
+          </div>
+        </div>
+
+        <div class="chaos-section-label">RHYTHMIC</div>
+
+        <div class="chaos-row">
+          <div class="chaos-row-top">
+            <div class="chaos-label"><b>prob</b></div>
+            <div class="chaos-val" id="cv-rhythmic-prob">.10</div>
+          </div>
+          <div class="chaos-bar-wrap">
+            <div class="chaos-range-bg rhythmic" id="crng-rhythmic-prob"></div>
+            <div class="chaos-bar rhythmic" id="cb-rhythmic-prob" style="width:10%"></div>
+            <div class="chaos-attractor"          id="ca-rhythmic-prob" style="left:10%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div><!-- #left-col -->
+
+  <!-- RIGHT: MAIN PANELS -->
+  <div id="right-col">
+
+    <!-- SPACE層: DRONE + GRANULAR (2カラム) -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+
+      <!-- DRONE -->
+      <div class="mod" style="--thumb:var(--c-drone)">
+        <div class="mhdr">
+          <div class="mbar" style="background:var(--c-drone)"></div>
+          <div class="mname">DRONE</div>
+          <span style="font-size:.57rem;color:var(--dim);margin-left:.2rem">SPACE層</span>
+        </div>
+        <div class="mbody">
+          <div class="pr">
+            <div class="pl"><b>freq</b>周波数(Hz)</div>
+            <input type="range" class="ctrl-slider" id="s-drone-freq"
+                   min="20" max="200" value="41" step="1"
+                   oninput="pSend('drone','freq',this.value,'v-drone-freq',v=>Math.round(v))">
+            <div class="pv" id="v-drone-freq">41</div>
+          </div>
+          <div class="pr">
+            <div class="pl"><b>feedback</b>FBループ</div>
+            <input type="range" class="ctrl-slider" id="s-drone-feedback"
+                   min="0" max="0.9" value="0.35" step="0.01"
+                   oninput="pSend('drone','feedback_amt',this.value,'v-drone-feedback',v=>v.toFixed(2))">
+            <div class="pv" id="v-drone-feedback">.35</div>
+          </div>
+          <div class="pr">
+            <div class="pl"><b>shimmer</b>シマー</div>
+            <input type="range" class="ctrl-slider" id="s-drone-shimmer"
+                   min="0" max="1" value="0.5" step="0.01"
+                   oninput="pSend('drone','shimmer',this.value,'v-drone-shimmer',v=>v.toFixed(2))">
+            <div class="pv" id="v-drone-shimmer">.50</div>
+          </div>
+          <div class="pr">
+            <div class="pl"><b>room</b>残響量</div>
+            <input type="range" class="ctrl-slider" id="s-drone-room"
+                   min="0" max="1" value="0.92" step="0.01"
+                   oninput="pSend('drone','room',this.value,'v-drone-room',v=>v.toFixed(2))">
+            <div class="pv" id="v-drone-room">.92</div>
+          </div>
+          <div class="pr">
+            <div class="pl"><b>amp</b>音量</div>
+            <input type="range" class="ctrl-slider" id="s-drone-amp"
+                   min="0" max="1" value="0.35" step="0.01"
+                   oninput="pSend('drone','amp',this.value,'v-drone-amp',v=>v.toFixed(2))">
+            <div class="pv" id="v-drone-amp">.35</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- GRANULAR -->
+      <div class="mod" style="--thumb:var(--c-gran)">
+        <div class="mhdr">
+          <div class="mbar" style="background:var(--c-gran)"></div>
+          <div class="mname">GRANULAR</div>
+          <span style="font-size:.57rem;color:var(--dim);margin-left:.2rem">SPACE層</span>
+        </div>
+        <div class="mbody">
+          <div class="pr">
+            <div class="pl"><b>density</b>粒の密度</div>
+            <input type="range" class="ctrl-slider" id="s-gran-density"
+                   min="1" max="80" value="5" step="1"
+                   oninput="pSend('granular','density',this.value,'v-gran-density',v=>Math.round(v))">
+            <div class="pv" id="v-gran-density">5</div>
+          </div>
+          <div class="pr">
+            <div class="pl"><b>spray</b>拡散</div>
+            <input type="range" class="ctrl-slider" id="s-gran-spray"
+                   min="0" max="1" value="0.3" step="0.01"
+                   oninput="pSend('granular','spray',this.value,'v-gran-spray',v=>v.toFixed(2))">
+            <div class="pv" id="v-gran-spray">.30</div>
+          </div>
+          <div class="pr">
+            <div class="pl"><b>pos</b>再生位置</div>
+            <input type="range" class="ctrl-slider" id="s-gran-pos"
+                   min="0" max="1" value="0.5" step="0.01"
+                   oninput="pSend('granular','pos',this.value,'v-gran-pos',v=>v.toFixed(2))">
+            <div class="pv" id="v-gran-pos">.50</div>
+          </div>
+          <div class="pr">
+            <div class="pl"><b>size</b>粒の大きさ</div>
+            <input type="range" class="ctrl-slider" id="s-gran-size"
+                   min="0.01" max="0.5" value="0.1" step="0.01"
+                   oninput="pSend('granular','size',this.value,'v-gran-size',v=>v.toFixed(2))">
+            <div class="pv" id="v-gran-size">.10</div>
+          </div>
+          <div class="pr">
+            <div class="pl"><b>room</b>残響量</div>
+            <input type="range" class="ctrl-slider" id="s-gran-room"
+                   min="0" max="1" value="0.7" step="0.01"
+                   oninput="pSend('granular','room',this.value,'v-gran-room',v=>v.toFixed(2))">
+            <div class="pv" id="v-gran-room">.70</div>
+          </div>
+          <div class="pr">
+            <div class="pl"><b>amp</b>音量</div>
+            <input type="range" class="ctrl-slider" id="s-gran-amp"
+                   min="0" max="1" value="0.35" step="0.01"
+                   oninput="pSend('granular','amp',this.value,'v-gran-amp',v=>v.toFixed(2))">
+            <div class="pv" id="v-gran-amp">.35</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- SPACE層グリッド end -->
+
+    <!-- DRONE GENERATORS (5種) -->
+    <div class="mod" id="dronegen-layer">
+      <div class="mhdr">
+        <div class="mbar" style="background:var(--c-dronegen)"></div>
+        <div class="mname" style="color:var(--c-dronegen)">DRONE GEN</div>
+        <span style="font-size:.57rem;color:rgba(56,189,248,.4);margin-left:.2rem">5種 — 同時複数起動可</span>
+        <button class="tb" style="margin-left:auto;padding:.18rem .5rem;font-size:.6rem;min-height:22px;border-color:#7f3333;color:#f87171" onclick="dgStopAll()">■ ALL</button>
+      </div>
+      <div class="mbody">
+        <div class="dg-grid">
+
+          <!-- 1. FM + グリッサンド (a_loss_of_self) -->
+          <div class="dg-row">
+            <span class="dg-type-label">FM</span>
+            <button class="dg-btn" id="dgbtn-fm-start" onclick="dgStart('fm')" title="FM+グリッサンド開始">▶</button>
+            <button class="dg-btn dg-stop-btn" onclick="dgStop('fm')" title="停止">■</button>
+            <div class="dg-param">
+              <span class="dg-label">freq</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.25" step="0.01"
+                     oninput="dgSend('fm','freq_norm',this.value,'dgv-fm-freq',v=>Math.round(20*Math.pow(15,v))+'Hz')">
+              <span class="dg-val" id="dgv-fm-freq">39Hz</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">mod</span>
+              <input type="range" class="dg-slider" min="0" max="6" value="2" step="0.1"
+                     oninput="dgSend('fm','mod_index',this.value,'dgv-fm-mod',v=>v.toFixed(1))">
+              <span class="dg-val" id="dgv-fm-mod">2.0</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">amp</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.30" step="0.01"
+                     oninput="dgSend('fm','amp',this.value,'dgv-fm-amp',v=>v.toFixed(2))">
+              <span class="dg-val" id="dgv-fm-amp">.30</span>
+            </div>
+          </div>
+
+          <!-- 2. 多声バンドパスノイズ (DroneCollider) -->
+          <div class="dg-row">
+            <span class="dg-type-label">NOISE</span>
+            <button class="dg-btn" id="dgbtn-noise-start" onclick="dgStart('noise')" title="多声バンドパスノイズ開始">▶</button>
+            <button class="dg-btn dg-stop-btn" onclick="dgStop('noise')" title="停止">■</button>
+            <div class="dg-param">
+              <span class="dg-label">freq</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.25" step="0.01"
+                     oninput="dgSend('noise','freq_norm',this.value,'dgv-noise-freq',v=>Math.round(20*Math.pow(15,v))+'Hz')">
+              <span class="dg-val" id="dgv-noise-freq">39Hz</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">damp</span>
+              <input type="range" class="dg-slider" min="0.5" max="2.0" value="1.2" step="0.05"
+                     oninput="dgSend('noise','damp_exp',this.value,'dgv-noise-damp',v=>v.toFixed(2))">
+              <span class="dg-val" id="dgv-noise-damp">1.20</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">amp</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.28" step="0.01"
+                     oninput="dgSend('noise','amp',this.value,'dgv-noise-amp',v=>v.toFixed(2))">
+              <span class="dg-val" id="dgv-noise-amp">.28</span>
+            </div>
+          </div>
+
+          <!-- 3. ウェーブテーブル+デグレード (SCgazer) -->
+          <div class="dg-row">
+            <span class="dg-type-label">WT</span>
+            <button class="dg-btn" id="dgbtn-wavetable-start" onclick="dgStart('wavetable')" title="ウェーブテーブル+デグレード開始">▶</button>
+            <button class="dg-btn dg-stop-btn" onclick="dgStop('wavetable')" title="停止">■</button>
+            <div class="dg-param">
+              <span class="dg-label">freq</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.25" step="0.01"
+                     oninput="dgSend('wavetable','freq_norm',this.value,'dgv-wt-freq',v=>Math.round(20*Math.pow(15,v))+'Hz')">
+              <span class="dg-val" id="dgv-wt-freq">39Hz</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">dg▲</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0" step="0.01"
+                     oninput="dgSend('wavetable','degrade',this.value,'dgv-wt-dg',v=>v.toFixed(2))"
+                     title="degrade: 0=原音 1=グリッチ">
+              <span class="dg-val" id="dgv-wt-dg">.00</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">amp</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.30" step="0.01"
+                     oninput="dgSend('wavetable','amp',this.value,'dgv-wt-amp',v=>v.toFixed(2))">
+              <span class="dg-val" id="dgv-wt-amp">.30</span>
+            </div>
+          </div>
+
+          <!-- 4. フィードバックネットワーク (rumush) -->
+          <div class="dg-row">
+            <span class="dg-type-label">FB</span>
+            <button class="dg-btn" id="dgbtn-feedback-start" onclick="dgStart('feedback')" title="フィードバックネットワーク開始">▶</button>
+            <button class="dg-btn dg-stop-btn" onclick="dgStop('feedback')" title="停止">■</button>
+            <div class="dg-param">
+              <span class="dg-label">freq</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.25" step="0.01"
+                     oninput="dgSend('feedback','freq_norm',this.value,'dgv-fb-freq',v=>Math.round(20*Math.pow(15,v))+'Hz')">
+              <span class="dg-val" id="dgv-fb-freq">39Hz</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">fback</span>
+              <input type="range" class="dg-slider" min="0" max="0.85" value="0.6" step="0.01"
+                     oninput="dgSend('feedback','feedback',this.value,'dgv-fb-fback',v=>v.toFixed(2))"
+                     title="feedback: 0.7超で自己発振気味">
+              <span class="dg-val" id="dgv-fb-fback">.60</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">amp</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.25" step="0.01"
+                     oninput="dgSend('feedback','amp',this.value,'dgv-fb-amp',v=>v.toFixed(2))">
+              <span class="dg-val" id="dgv-fb-amp">.25</span>
+            </div>
+          </div>
+
+          <!-- 5. 揺れるSinOsc雲 (Meandering Sines) -->
+          <div class="dg-row">
+            <span class="dg-type-label">SINES</span>
+            <button class="dg-btn" id="dgbtn-sines-start" onclick="dgStart('sines')" title="揺れるSinOsc雲開始">▶</button>
+            <button class="dg-btn dg-stop-btn" onclick="dgStop('sines')" title="停止">■</button>
+            <div class="dg-param">
+              <span class="dg-label">freq</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.25" step="0.01"
+                     oninput="dgSend('sines','freq_norm',this.value,'dgv-sn-freq',v=>Math.round(20*Math.pow(15,v))+'Hz')">
+              <span class="dg-val" id="dgv-sn-freq">39Hz</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">chord</span>
+              <input type="range" class="dg-slider" min="0" max="3" value="0" step="1"
+                     oninput="dgSend('sines','chord_type',this.value,'dgv-sn-chord',v=>['5th','maj6','min6','maj7'][Math.round(v)])"
+                     title="chord_type: 0=5th 1=maj6 2=min6 3=maj7">
+              <span class="dg-val" id="dgv-sn-chord">5th</span>
+            </div>
+            <div class="dg-param">
+              <span class="dg-label">amp</span>
+              <input type="range" class="dg-slider" min="0" max="1" value="0.28" step="0.01"
+                     oninput="dgSend('sines','amp',this.value,'dgv-sn-amp',v=>v.toFixed(2))">
+              <span class="dg-val" id="dgv-sn-amp">.28</span>
+            </div>
+          </div>
+
+        </div><!-- .dg-grid -->
+      </div>
+    </div><!-- DRONE GEN end -->
+
+    <!-- EVENT層: RHYTHMIC -->
+    <div class="mod" style="--thumb:var(--c-rhythmic)">
+      <div class="mhdr">
+        <div class="mbar" style="background:var(--c-rhythmic)"></div>
+        <div class="mname">RHYTHMIC</div>
+        <span style="font-size:.57rem;color:var(--dim);margin-left:.2rem">EVENT層</span>
+      </div>
+      <div class="mbody">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.5rem">
+          <!-- リズムパラメーター -->
+          <div>
+            <div class="sec">パラメーター</div>
+            <div class="pr">
+              <div class="pl"><b>prob</b>発火確率</div>
+              <input type="range" class="ctrl-slider" id="s-rhythmic-prob"
+                     min="0" max="1" value="0.1" step="0.01"
+                     oninput="pSend('rhythmic','prob',this.value,'v-rhythmic-prob',v=>v.toFixed(2))">
+              <div class="pv" id="v-rhythmic-prob">.10</div>
+            </div>
+            <div class="pr">
+              <div class="pl"><b>bpm</b>テンポ</div>
+              <input type="range" id="s-rhythmic-bpm"
+                     min="40" max="200" value="120" step="1"
+                     oninput="bpmChange(this.value)">
+              <div class="pv" id="v-rhythmic-bpm">120</div>
+            </div>
+            <div class="pr">
+              <div class="pl"><b>amp</b>音量</div>
+              <input type="range" id="s-rhythmic-amp"
+                     min="0" max="1" value="0.5" step="0.01"
+                     oninput="pSend('rhythmic','amp',this.value,'v-rhythmic-amp',v=>v.toFixed(2))">
+              <div class="pv" id="v-rhythmic-amp">.50</div>
+            </div>
+          </div>
+          <!-- START / STOP -->
+          <div>
+            <div class="sec">コントロール</div>
+            <div class="btn-row">
+              <button class="tb on" id="btn-rhythmic-start" onclick="rhythmicStart()">START</button>
+            </div>
+            <div class="btn-row">
+              <button class="tb off" id="btn-rhythmic-stop" onclick="rhythmicStop()">STOP</button>
+            </div>
+          </div>
+          <!-- 音源選択 -->
+          <div>
+            <div class="sec">音源</div>
+            <div class="src-grid">
+              <button class="src-btn on" id="src-grain"  onclick="toggleSrc('grain')">grain</button>
+              <button class="src-btn"    id="src-klank"  onclick="toggleSrc('klank')">klank</button>
+              <button class="src-btn"    id="src-fm"     onclick="toggleSrc('fm')">fm</button>
+              <button class="src-btn"    id="src-spring" onclick="toggleSrc('spring')">spring</button>
+              <button class="src-btn"    id="src-chaos"  onclick="toggleSrc('chaos')">chaos</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div><!-- EVENT層 end -->
+
+    <!-- EFFECT LAYER -->
+    <div class="mod" id="effect-layer">
+      <div class="mhdr">
+        <div class="mbar" style="background:var(--c-effect)"></div>
+        <div class="mname">EFFECT LAYER</div>
+        <span style="font-size:.57rem;color:rgba(232,121,249,.5);margin-left:.2rem">ライブ中に手で触る場所 — モードに関係なく常に有効</span>
+      </div>
+      <div class="mbody">
+        <div class="effect-grid">
+
+          <!-- DELAY -->
+          <div class="effect-module">
+            <div class="effect-title">DELAY</div>
+            <div class="pr" style="--thumb:var(--c-effect)">
+              <div class="pl"><b>time</b>ディレイタイム</div>
+              <input type="range" id="s-delay-time"
+                     min="0.01" max="1.5" value="0.3" step="0.01"
+                     oninput="efxSend('delay','time',this.value,'v-delay-time',v=>v.toFixed(2))">
+              <div class="pv" id="v-delay-time">.30</div>
+            </div>
+            <div class="pr" style="--thumb:var(--c-effect)">
+              <div class="pl"><b>feedback</b>フィードバック</div>
+              <input type="range" id="s-delay-fb"
+                     min="0" max="0.95" value="0.4" step="0.01"
+                     oninput="efxSend('delay','feedback',this.value,'v-delay-fb',v=>v.toFixed(2))">
+              <div class="pv" id="v-delay-fb">.40</div>
+            </div>
+            <div class="pr" style="--thumb:var(--c-effect)">
+              <div class="pl"><b>mix</b>ミックス</div>
+              <input type="range" id="s-delay-mix"
+                     min="0" max="1" value="0.3" step="0.01"
+                     oninput="efxSend('delay','mix',this.value,'v-delay-mix',v=>v.toFixed(2))">
+              <div class="pv" id="v-delay-mix">.30</div>
+            </div>
+          </div>
+
+          <!-- SPECTRAL -->
+          <div class="effect-module">
+            <div class="effect-title">SPECTRAL</div>
+            <div class="pr" style="--thumb:var(--c-effect)">
+              <div class="pl"><b>freeze</b>フリーズ</div>
+              <input type="range" id="s-spectral-freeze"
+                     min="0" max="1" value="0" step="0.01"
+                     oninput="efxSend('spectral','freeze',this.value,'v-spectral-freeze',v=>v.toFixed(2))">
+              <div class="pv" id="v-spectral-freeze">.00</div>
+            </div>
+            <div class="pr" style="--thumb:var(--c-effect)">
+              <div class="pl"><b>blur</b>ブラー</div>
+              <input type="range" id="s-spectral-blur"
+                     min="0" max="1" value="0" step="0.01"
+                     oninput="efxSend('spectral','blur',this.value,'v-spectral-blur',v=>v.toFixed(2))">
+              <div class="pv" id="v-spectral-blur">.00</div>
+            </div>
+          </div>
+
+          <!-- WAVEFOLD -->
+          <div class="effect-module">
+            <div class="effect-title">WAVEFOLD</div>
+            <div class="pr" style="--thumb:var(--c-effect)">
+              <div class="pl"><b>drive</b>ドライブ</div>
+              <input type="range" id="s-wavefold-drive"
+                     min="0" max="1" value="0" step="0.01"
+                     oninput="efxSend('wavefold','drive',this.value,'v-wavefold-drive',v=>v.toFixed(2))">
+              <div class="pv" id="v-wavefold-drive">.00</div>
+            </div>
+            <div class="pr" style="--thumb:var(--c-effect)">
+              <div class="pl"><b>mix</b>ミックス</div>
+              <input type="range" id="s-wavefold-mix"
+                     min="0" max="1" value="0" step="0.01"
+                     oninput="efxSend('wavefold','mix',this.value,'v-wavefold-mix',v=>v.toFixed(2))">
+              <div class="pv" id="v-wavefold-mix">.00</div>
+            </div>
+          </div>
+
+          <!-- FEEDBACK LOOP -->
+          <div class="effect-module">
+            <div class="effect-title">FEEDBACK</div>
+            <div class="pr" style="--thumb:var(--c-effect)">
+              <div class="pl"><b>amount</b>量</div>
+              <input type="range" id="s-feedback-amount"
+                     min="0" max="0.9" value="0" step="0.01"
+                     oninput="efxSend('feedback','amount',this.value,'v-feedback-amount',v=>v.toFixed(2))">
+              <div class="pv" id="v-feedback-amount">.00</div>
+            </div>
+            <div class="pr" style="--thumb:var(--c-effect)">
+              <div class="pl"><b>rate</b>レート</div>
+              <input type="range" id="s-feedback-rate"
+                     min="0.01" max="1" value="0.1" step="0.01"
+                     oninput="efxSend('feedback','rate',this.value,'v-feedback-rate',v=>v.toFixed(2))">
+              <div class="pv" id="v-feedback-rate">.10</div>
+            </div>
+          </div>
+
+        </div><!-- .effect-grid -->
+      </div>
+    </div><!-- EFFECT LAYER end -->
+
+    <!-- PERCUSSION SEQUENCER -->
+    <div class="mod" id="perc-layer">
+      <div class="mhdr">
+        <div class="mbar"></div>
+        <div class="mname">PERCUSSION</div>
+        <span style="font-size:.57rem;color:rgba(244,63,94,.5);margin-left:.2rem">16ステップシーケンサー</span>
+      </div>
+      <div class="mbody">
+        <!-- コントロール行 -->
+        <div class="perc-controls">
+          <button class="perc-btn" id="btn-perc-start" onclick="percStart()">START</button>
+          <button class="perc-btn" id="btn-perc-stop"  onclick="percStop()">STOP</button>
+          <button class="perc-btn" id="btn-perc-step"  onclick="percSetMode('step')" style="border-color:var(--c-drums);color:var(--c-drums)">STEP</button>
+          <button class="perc-btn" id="btn-perc-chaos" onclick="percSetMode('chaos')">CHAOS</button>
+          <button class="perc-btn" id="btn-perc-scatter" onclick="percScatter()">SCATTER ALL</button>
+          <div class="perc-ctrl-group">
+            <span class="perc-ctrl-label">BPM</span>
+            <input type="range" class="perc-slider" id="s-perc-bpm"
+                   min="60" max="200" value="120" step="1"
+                   oninput="percBpmChange(this.value)">
+            <span class="perc-ctrl-val" id="v-perc-bpm">120</span>
+          </div>
+          <div class="perc-ctrl-group">
+            <span class="perc-ctrl-label">CUTOFF</span>
+            <input type="range" class="perc-slider" id="s-perc-cutoff"
+                   min="200" max="8000" value="4000" step="50"
+                   oninput="percFilterChange()">
+            <span class="perc-ctrl-val" id="v-perc-cutoff">4000</span>
+            <span class="perc-ctrl-label" style="font-size:.55rem;margin-left:.2rem">RES</span>
+            <input type="range" class="perc-slider" id="s-perc-res"
+                   min="0" max="1" value="0.3" step="0.01"
+                   oninput="percFilterChange()">
+            <span class="perc-ctrl-val" id="v-perc-res">.30</span>
+          </div>
+        </div>
+        <!-- パッドグリッド -->
+        <div class="perc-grid" id="perc-grid">
+          <!-- JSで生成 -->
+        </div>
+        <!-- CHAOS ENGINE -->
+        <div class="perc-chaos-section">
+          <div class="perc-chaos-header">CHAOS ENGINE</div>
+          <div class="perc-chaos-controls">
+            <button class="perc-btn" id="btn-chaos-start" onclick="chaosPStart()">START CHAOS</button>
+            <button class="perc-btn" id="btn-chaos-stop"  onclick="chaosPStop()">STOP CHAOS</button>
+          </div>
+          <div class="perc-chaos-params">
+            <div class="perc-chaos-row">
+              <span class="perc-chaos-label">DENSITY</span>
+              <input type="range" class="perc-mini-slider" id="s-chaos-density"
+                     min="0.5" max="20" value="4.0" step="0.1"
+                     oninput="chaosPDensity(this.value)" style="width:120px">
+              <span class="perc-chaos-val" id="v-chaos-density">4.0/s</span>
+            </div>
+            <div class="perc-chaos-row">
+              <span class="perc-chaos-label">AMP</span>
+              <input type="range" class="perc-mini-slider" id="s-chaos-amp"
+                     min="0" max="1" value="0.6" step="0.01"
+                     oninput="chaosPAmp(this.value)" style="width:120px">
+              <span class="perc-chaos-val" id="v-chaos-amp">0.60</span>
+            </div>
+            <div class="perc-chaos-row">
+              <span class="perc-chaos-label">FILTER</span>
+              <input type="range" class="perc-mini-slider" id="s-chaos-filter"
+                     min="200" max="8000" value="4000" step="50"
+                     oninput="chaosPFilter(this.value)" style="width:120px">
+              <span class="perc-chaos-val" id="v-chaos-filter">4000Hz</span>
+            </div>
+            <!-- 楽器ウェイト -->
+            <div class="perc-chaos-row">
+              <span class="perc-chaos-label">K</span>
+              <input type="range" class="perc-mini-slider" id="s-chaos-w0"
+                     min="0" max="1" value="0.4" step="0.05"
+                     oninput="chaosPWeights()" style="width:55px">
+              <span class="perc-chaos-label">S</span>
+              <input type="range" class="perc-mini-slider" id="s-chaos-w1"
+                     min="0" max="1" value="0.3" step="0.05"
+                     oninput="chaosPWeights()" style="width:55px">
+              <span class="perc-chaos-label">H</span>
+              <input type="range" class="perc-mini-slider" id="s-chaos-w2"
+                     min="0" max="1" value="0.2" step="0.05"
+                     oninput="chaosPWeights()" style="width:55px">
+              <span class="perc-chaos-label">C</span>
+              <input type="range" class="perc-mini-slider" id="s-chaos-w3"
+                     min="0" max="1" value="0.1" step="0.05"
+                     oninput="chaosPWeights()" style="width:55px">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div><!-- PERCUSSION end -->
+
+    <!-- LOG -->
+    <div id="log-panel">
+      <div id="log-hdr" onclick="toggleLog()">
+        <div class="mbar" style="background:#444;width:3px;height:13px;border-radius:2px;flex-shrink:0"></div>
+        <span style="font-size:.65rem;font-weight:bold;letter-spacing:.14em;color:var(--bright)">LOG</span>
+        <span id="log-toggle-hint" style="font-size:.57rem;color:var(--dim);margin-left:.3rem">▼ 展開</span>
+      </div>
+      <div id="log-body" style="display:none">
+        <div id="log"></div>
+      </div>
+    </div>
+
+  </div><!-- #right-col -->
+
+</main>
+
+<script>
+const WS_URL = "ws://localhost:8765";
+let ws, reconnectTimer = null, reconnectDelay = 1000;
+
+// モード: 'chaos' = 自律モード, 'ctrl' = 制御モード
+let currentMode = 'ctrl';
+
+// 選択中シーン
+let currentScene = null;
+
+// Rhythmic 音源の選択状態
+const activeSources = new Set(['grain']);
+
+// ── WebSocket 接続 ────────────────────────────────────────
+function connect() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    reconnectDelay = 1000;
+    setDot('ws', 'on');
+    addLog('ws', '接続完了');
+  };
+  ws.onclose = () => {
+    setDot('ws', 'off');
+    scheduleReconnect();
+  };
+  ws.onerror = (e) => {
+    setDot('ws', 'err');
+    addLog('ws_err', '接続エラー');
+  };
+  ws.onmessage = (e) => {
+    let m;
+    try { m = JSON.parse(e.data); } catch { return; }
+    handleMessage(m);
+  };
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connect();
+  }, reconnectDelay);
+  reconnectDelay = Math.min(reconnectDelay * 2, 5000);
+}
+
+function send(msg) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(msg));
+  }
+}
+
+// ── メッセージ受信ハンドラ ─────────────────────────────────
+function handleMessage(m) {
+  const t = m.type;
+
+  if (t === 'sc_ready') {
+    setSC('ready');
+  } else if (t === 'sc_status') {
+    setSC(m.ready ? 'ready' : 'booting');
+  } else if (t === 'sc_booting') {
+    setSC('booting');
+  } else if (t === 'sc_error') {
+    setSC('error');
+    addLog('sc_err', m.message || '');
+  } else if (t === 'scene_changed') {
+    // シーン変更時にシーン名を取得してハイライト更新
+    if (m.scene && m.scene.name) {
+      highlightScene(m.scene.name);
+    }
+  } else if (t === 'audio_devices') {
+    updateDeviceSelect(m.current || '', m.devices || []);
+  } else if (t === 'chaos_state' || t === 'autonomous_update') {
+    updateChaosState(m.state || m.params || m);
+  } else if (t === 'chaos_started') {
+    setChaosRunning(true);
+  } else if (t === 'chaos_stopped') {
+    setChaosRunning(false);
+  } else if (m.address === '/matoma/perc/tick') {
+    // SCからのプレイヘッド位置通知
+    const step = parseInt(m.args && m.args[0] != null ? m.args[0] : -1, 10);
+    if (!isNaN(step) && step >= 0 && step < 16) {
+      percUpdatePlayhead(step);
+    }
+  } else if (m.address === '/matoma/perc/pattern') {
+    // ユークリッド/ランダム生成後にSCがパターンを返す
+    if (!Array.isArray(m.args) || m.args.length < 17) return;
+    const track = m.args[0];
+    const steps = m.args.slice(1); // 16個の値
+    if (track >= 0 && track < 4) {
+      steps.forEach((val, step) => {
+        percState.steps[track][step] = val;
+        percUpdatePad(track, step);
+      });
+    }
+  } else {
+    addLog(m.type || m.address || '?', JSON.stringify(m.args || m.params || {}));
+  }
+}
+
+// ── 状態表示 ──────────────────────────────────────────────
+function setDot(id, state) {
+  const el = document.getElementById(id + '-dot');
+  if (!el) return;
+  el.className = 'dot' + (state === 'on' ? ' on' : state === 'warn' ? ' warn' : '');
+}
+
+function setSC(state) {
+  const d = document.getElementById('sc-dot');
+  const t = document.getElementById('sc-label');
+  if (state === 'ready') {
+    d.className = 'dot on'; t.textContent = 'SC: ready'; t.style.color = 'var(--c-scene)';
+  } else if (state === 'booting') {
+    d.className = 'dot warn'; t.textContent = 'SC: boot...'; t.style.color = 'var(--c-warn)';
+  } else {
+    d.className = 'dot err'; t.textContent = 'SC: error'; t.style.color = '#f87171';
+  }
+}
+
+// ── CHAOS STATE 可視化 ────────────────────────────────────
+function setChaosRunning(on) {
+  const body = document.getElementById('chaos-body');
+  const status = document.getElementById('chaos-status');
+  if (body) body.classList.toggle('chaos-running', on);
+  if (status) {
+    status.textContent = on ? '動作中' : '停止';
+    status.style.color = on ? 'var(--c-auto)' : 'var(--dim)';
+  }
+}
+
+// chaos_state の params 構造（新形式）:
+// { drone: { freq: {value, attractor, range}, ... }, granular: {...}, rhythmic: {...} }
+// 旧形式（value のみのスカラー）も後方互換で受け入れる。
+function _unpack(entry) {
+  if (entry != null && typeof entry === 'object') {
+    return { val: entry.value, att: entry.attractor, rng: entry.range };
+  }
+  return { val: entry, att: null, rng: null };
+}
+
+function updateChaosState(params) {
+  if (!params) return;
+
+  // DRONE
+  if (params.drone) {
+    const d = params.drone;
+    const entries = [
+      { key: 'drone-freq',     src: d.freq,         min: 20,  max: 200, fmt: v => Math.round(v),   slider: 's-drone-freq' },
+      { key: 'drone-feedback', src: d.feedback_amt,  min: 0,   max: 0.9, fmt: v => v.toFixed(2),    slider: 's-drone-feedback' },
+      { key: 'drone-shimmer',  src: d.shimmer,        min: 0,   max: 1,   fmt: v => v.toFixed(2),    slider: 's-drone-shimmer' },
+      { key: 'drone-room',     src: d.room,           min: 0,   max: 1,   fmt: v => v.toFixed(2),    slider: 's-drone-room' },
+    ];
+    for (const e of entries) {
+      if (e.src == null) continue;
+      const { val, att, rng } = _unpack(e.src);
+      updateChaosBar(e.key, val, att, rng, e.min, e.max, e.fmt);
+      if (currentMode === 'chaos' && val != null) syncSlider(e.slider, val);
+    }
+  }
+
+  // GRANULAR
+  if (params.granular) {
+    const g = params.granular;
+    const entries = [
+      { key: 'gran-density', src: g.density, min: 1,  max: 80, fmt: v => Math.round(v), slider: 's-gran-density' },
+      { key: 'gran-spray',   src: g.spray,   min: 0,  max: 1,  fmt: v => v.toFixed(2),  slider: 's-gran-spray' },
+      { key: 'gran-pos',     src: g.pos,     min: 0,  max: 1,  fmt: v => v.toFixed(2),  slider: 's-gran-pos' },
+    ];
+    for (const e of entries) {
+      if (e.src == null) continue;
+      const { val, att, rng } = _unpack(e.src);
+      updateChaosBar(e.key, val, att, rng, e.min, e.max, e.fmt);
+      if (currentMode === 'chaos' && val != null) syncSlider(e.slider, val);
+    }
+  }
+
+  // RHYTHMIC
+  if (params.rhythmic) {
+    const r = params.rhythmic;
+    if (r.prob != null) {
+      const { val, att, rng } = _unpack(r.prob);
+      updateChaosBar('rhythmic-prob', val, att, rng, 0, 1, v => v.toFixed(2));
+      if (currentMode === 'chaos' && val != null) syncSlider('s-rhythmic-prob', val);
+    }
+  }
+}
+
+// key         : CSS id のサフィックス（例: 'drone-freq'）
+// value       : 現在値
+// attractor   : 引力点（null なら非表示）
+// rangeVal    : 揺れ幅（null なら range-bg 非表示）
+// min/max     : パラメーター全体の最小・最大
+// fmt         : 表示テキスト生成関数
+function updateChaosBar(key, value, attractor, rangeVal, min, max, fmt) {
+  const pct = v => Math.max(0, Math.min(100, ((v - min) / (max - min)) * 100));
+
+  const bar  = document.getElementById('cb-' + key);
+  const valEl = document.getElementById('cv-' + key);
+  const attEl = document.getElementById('ca-' + key);
+  const rngEl = document.getElementById('crng-' + key);
+
+  if (value != null) {
+    if (bar)   bar.style.width = pct(value) + '%';
+    if (valEl) valEl.textContent = fmt(value);
+  }
+
+  // 引力点マーカー（白い縦線）
+  if (attEl) {
+    if (attractor != null) {
+      attEl.style.left    = pct(attractor) + '%';
+      attEl.style.display = '';
+    } else {
+      attEl.style.display = 'none';
+    }
+  }
+
+  // range 背景（引力点 ± range の半透明領域）
+  if (rngEl) {
+    if (attractor != null && rangeVal != null) {
+      const lo = pct(attractor - rangeVal);
+      const hi = pct(attractor + rangeVal);
+      rngEl.style.left    = lo + '%';
+      rngEl.style.width   = (hi - lo) + '%';
+      rngEl.style.display = '';
+    } else {
+      rngEl.style.display = 'none';
+    }
+  }
+}
+
+function syncSlider(sliderId, value) {
+  const el = document.getElementById(sliderId);
+  if (el) el.value = value;
+}
+
+// ── 音声デバイス ──────────────────────────────────────────
+function updateDeviceSelect(current, devices) {
+  const sel = document.getElementById('device-select');
+  if (!sel) return;
+  sel.innerHTML = '';
+
+  // デフォルト（空文字）オプション
+  const defOpt = document.createElement('option');
+  defOpt.value = '';
+  defOpt.textContent = '(システムデフォルト)';
+  defOpt.selected = current === '';
+  sel.appendChild(defOpt);
+
+  // 入力専用デバイス（マイク等）は除外。出力デバイス名のキーワードで判断
+  const OUTPUT_KEYWORDS = ['スピーカー', 'ス', 'Speaker', 'Output', 'Aggregate', 'Audio', 'Zoom'];
+  const INPUT_ONLY_PREFIXES = ['MacBook Proの'];  // マイクのみのデバイスを除外
+  devices.forEach(dev => {
+    if (INPUT_ONLY_PREFIXES.some(p => dev.startsWith(p))) return;  // 入力専用をスキップ
+    const opt = document.createElement('option');
+    opt.value = dev;
+    opt.textContent = dev.length > 28 ? dev.slice(0, 26) + '…' : dev;
+    opt.title = dev;
+    opt.selected = dev === current;
+    sel.appendChild(opt);
+  });
+
+  addLog('AUDIO', `デバイスリスト: ${devices.length}件 / 現在: ${current || 'デフォルト'}`);
+}
+
+function onDeviceSelectChange(value) {
+  const label = value || 'システムデフォルト';
+  if (!confirm(`音声出力を「${label}」に切り替えます。\nSuperCollider を再起動します。よろしいですか？`)) {
+    // キャンセル時は選択を元に戻す（次のaudio_devicesメッセージで自動更新される）
+    send({ address: '/matoma/audio/get_devices', args: [] });
+    return;
+  }
+  send({ address: '/matoma/audio/set_device', args: [value] });
+  addLog('AUDIO', `デバイス切替 → ${label}`);
+}
+
+// ── 全停止 ────────────────────────────────────────────────
+function testTone() {
+  send({ address: '/matoma/test_tone', args: [] });
+  const btn = document.getElementById('btn-test');
+  if (btn) { btn.textContent = '♪ ...'; }
+  setTimeout(() => { if (btn) btn.textContent = '♪ テスト'; }, 1000);
+  addLog('TEST', '880Hzテスト音を送信');
+}
+
+function stopAll() {
+  send({ address: '/matoma/all/stop', args: [] });
+  // DroneGen ボタンの表示もリセット
+  ['fm', 'noise', 'wavetable', 'feedback', 'sines'].forEach(type => {
+    dgActive.delete(type);
+    const btn = document.getElementById(`dgbtn-${type}-start`);
+    if (btn) btn.classList.remove('start-on');
+  });
+  addLog('STOP', '全停止');
+}
+
+function restartAll() {
+  const btn = document.getElementById('btn-restart');
+  if (btn) { btn.textContent = '↺ 再起動中...'; btn.style.opacity = '0.5'; }
+  send({ address: '/matoma/all/restart', args: [] });
+  addLog('RESTART', '再セットアップ中...');
+  setTimeout(() => {
+    if (btn) { btn.textContent = '↺ 再セットアップ'; btn.style.opacity = '1'; }
+  }, 3000);
+}
+
+// ── MODE ──────────────────────────────────────────────────
+function setChaosMode() {
+  currentMode = 'chaos';
+  document.getElementById('btn-chaos-mode').className = 'mode-btn active-chaos';
+  document.getElementById('btn-ctrl-mode').className  = 'mode-btn';
+
+  // ctrl-slider をグレーアウト
+  document.querySelectorAll('.ctrl-slider').forEach(s => {
+    s.classList.add('disabled-slider');
+  });
+
+  // カオスエンジン開始
+  send({ address: '/matoma/chaos/start', args: [] });
+  setChaosRunning(true);
+  addLog('mode', '自律モード ON');
+}
+
+function setCtrlMode() {
+  currentMode = 'ctrl';
+  document.getElementById('btn-chaos-mode').className = 'mode-btn';
+  document.getElementById('btn-ctrl-mode').className  = 'mode-btn active-ctrl';
+
+  // ctrl-slider を有効化
+  document.querySelectorAll('.ctrl-slider').forEach(s => {
+    s.classList.remove('disabled-slider');
+  });
+
+  // カオスエンジン停止
+  send({ address: '/matoma/chaos/stop', args: [] });
+  setChaosRunning(false);
+  addLog('mode', '制御モード ON');
+}
+
+// ── SCENE ─────────────────────────────────────────────────
+const SCENE_NAMES = ['深淵', '浮遊', '緊張', '崩壊'];
+
+function selectScene(name) {
+  // bridge.py は address ベースのメッセージを受け付ける
+  send({ address: '/matoma/scene', args: [name] });
+  highlightScene(name);
+  addLog('/scene', name);
+}
+
+function highlightScene(name) {
+  currentScene = name;
+  SCENE_NAMES.forEach(s => {
+    const btn = document.getElementById('scb-' + s);
+    if (btn) btn.classList.toggle('on', s === name);
+  });
+}
+
+// ── PARAM 送信（SPACE層 - ctrl-slider 専用） ─────────────
+// 自律モード中は ctrl-slider からの送信を止める（disabled-slider で pointer-events:none なので実際には呼ばれない）
+function pSend(module, key, rawVal, vidId, fmt) {
+  const v = parseFloat(rawVal);
+  const el = document.getElementById(vidId);
+  if (el) el.textContent = fmt(v);
+
+  // bridge.py の ws_handler では address + args 形式を期待している
+  // drone module -> /matoma/drone/param [key, value]
+  // granular module -> /matoma/granular/param [key, value]
+  // rhythmic module -> /matoma/rhythmic/param [key, value]
+  const addr = '/matoma/' + module + '/param';
+  send({ address: addr, args: [key, v] });
+}
+
+// ── EFFECT LAYER 送信（常に有効） ─────────────────────────
+function efxSend(module, key, rawVal, vidId, fmt) {
+  const v = parseFloat(rawVal);
+  const el = document.getElementById(vidId);
+  if (el) el.textContent = fmt(v);
+
+  // effect/delay -> /matoma/effect/delay/param [key, value]
+  const addr = '/matoma/effect/' + module + '/param';
+  send({ address: addr, args: [key, v] });
+}
+
+// ── RHYTHMIC ──────────────────────────────────────────────
+function rhythmicStart() {
+  send({ address: '/matoma/rhythmic/start', args: [] });
+  document.getElementById('btn-rhythmic-start').className = 'tb on';
+  document.getElementById('btn-rhythmic-stop').className  = 'tb';
+  addLog('/rhythmic', 'START');
+}
+
+function rhythmicStop() {
+  send({ address: '/matoma/rhythmic/stop', args: [] });
+  document.getElementById('btn-rhythmic-start').className = 'tb on';
+  document.getElementById('btn-rhythmic-stop').className  = 'tb off';
+  addLog('/rhythmic', 'STOP');
+}
+
+function bpmChange(v) {
+  const val = Math.round(parseFloat(v));
+  const el = document.getElementById('v-rhythmic-bpm');
+  if (el) el.textContent = val;
+  send({ address: '/matoma/rhythmic/param', args: ['bpm', val] });
+}
+
+function toggleSrc(name) {
+  const btn = document.getElementById('src-' + name);
+  if (!btn) return;
+  if (activeSources.has(name)) {
+    activeSources.delete(name);
+    btn.classList.remove('on');
+  } else {
+    activeSources.add(name);
+    btn.classList.add('on');
+  }
+  send({ address: '/matoma/rhythmic/sources', args: [...activeSources] });
+}
+
+// ── LOG ───────────────────────────────────────────────────
+let logVisible = false;
+function toggleLog() {
+  logVisible = !logVisible;
+  const body = document.getElementById('log-body');
+  const hint = document.getElementById('log-toggle-hint');
+  if (body) body.style.display = logVisible ? '' : 'none';
+  if (hint) hint.textContent = logVisible ? '▲ 折りたたむ' : '▼ 展開';
+}
+
+function addLog(addr, args) {
+  const log = document.getElementById('log');
+  if (!log) return;
+  const d = document.createElement('div');
+  d.className = 'le';
+  const lt = document.createElement('span'); lt.className = 'lt';
+  lt.textContent = new Date().toLocaleTimeString('ja-JP');
+  const la = document.createElement('span'); la.className = 'la';
+  la.textContent = addr;
+  const lv = document.createElement('span'); lv.className = 'lv';
+  lv.textContent = typeof args === 'string' ? args : JSON.stringify(args);
+  d.append(lt, la, lv);
+  log.appendChild(d);
+  while (log.children.length > 120) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ── KEYBOARD SHORTCUTS ────────────────────────────────────
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  const sceneMap = { '1': '深淵', '2': '浮遊', '3': '緊張', '4': '崩壊' };
+  if (sceneMap[e.key]) selectScene(sceneMap[e.key]);
+});
+
+// ── PERCUSSION SEQUENCER ──────────────────────────────────
+const PERC_TRACKS = ['KICK', 'SNARE', 'HIHAT', 'CLAP'];
+
+const percState = {
+  steps: Array.from({length: 4}, () => new Array(16).fill(0)),
+  probs: Array.from({length: 4}, () => new Array(16).fill(100)), // 0-100
+  bpm: 120,
+  cutoff: 4000,
+  res: 0.3,
+  currentStep: -1,
+  running: false,
+  mode: 'step',    // 'step' | 'chaos'
+  reversed: false,
+  trackReverse: [false, false, false, false],
+};
+
+// CHAOS ENGINE の状態
+const percChaosState = {
+  running: false,
+  density: 4.0,
+  amp: 0.6,
+  filter: 4000,
+  weights: [0.4, 0.3, 0.2, 0.1],
+};
+
+// グリッド描画
+function percBuildGrid() {
+  const grid = document.getElementById('perc-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  PERC_TRACKS.forEach((trackName, trackIdx) => {
+    const row = document.createElement('div');
+    row.className = 'perc-row';
+
+    const label = document.createElement('div');
+    label.className = 'perc-track-name';
+    label.textContent = trackName;
+    row.appendChild(label);
+
+    const stepsWrap = document.createElement('div');
+    stepsWrap.className = 'perc-steps';
+
+    // 4拍ずつグループ化
+    for (let beat = 0; beat < 4; beat++) {
+      const group = document.createElement('div');
+      group.className = 'perc-beat-group';
+      for (let s = 0; s < 4; s++) {
+        const step = beat * 4 + s;
+        const pad = document.createElement('div');
+        pad.className = 'perc-pad';
+        pad.id = `pad-${trackIdx}-${step}`;
+        pad.addEventListener('click', () => percPadClick(trackIdx, step));
+        // タッチ対応
+        pad.addEventListener('touchend', (e) => {
+          e.preventDefault();
+          percPadClick(trackIdx, step);
+        });
+        group.appendChild(pad);
+      }
+      stepsWrap.appendChild(group);
+    }
+    row.appendChild(stepsWrap);
+
+    // トラック行末のコントロール（RAND / EUCLID / CLR）
+    const rowCtrl = document.createElement('div');
+    rowCtrl.className = 'perc-row-controls';
+
+    // RAND スライダー + ボタン
+    const randLabel = document.createElement('span');
+    randLabel.className = 'perc-ctrl-label';
+    randLabel.style.cssText = 'font-size:.55rem';
+    randLabel.textContent = 'RAND';
+    const randSlider = document.createElement('input');
+    randSlider.type = 'range';
+    randSlider.className = 'perc-mini-slider';
+    randSlider.id = `s-rand-${trackIdx}`;
+    randSlider.min = '0'; randSlider.max = '1'; randSlider.value = '0.5'; randSlider.step = '0.01';
+    const randBtn = document.createElement('button');
+    randBtn.className = 'perc-row-ctrl-btn';
+    randBtn.textContent = '\u21BA';
+    randBtn.title = 'ランダムパターン生成';
+    randBtn.addEventListener('click', () => percRandomize(trackIdx));
+
+    // EUCLID スライダー + ボタン
+    const euclidLabel = document.createElement('span');
+    euclidLabel.className = 'perc-ctrl-label';
+    euclidLabel.style.cssText = 'font-size:.55rem;margin-left:.15rem';
+    euclidLabel.textContent = 'EUCLID';
+    const euclidSlider = document.createElement('input');
+    euclidSlider.type = 'range';
+    euclidSlider.className = 'perc-mini-slider';
+    euclidSlider.id = `s-euclid-${trackIdx}`;
+    euclidSlider.min = '1'; euclidSlider.max = '16'; euclidSlider.value = '4'; euclidSlider.step = '1';
+    const euclidBtn = document.createElement('button');
+    euclidBtn.className = 'perc-row-ctrl-btn';
+    euclidBtn.textContent = '\u2B21';
+    euclidBtn.title = 'ユークリッドリズム生成';
+    euclidBtn.addEventListener('click', () => percEuclid(trackIdx));
+
+    // CLR ボタン
+    const clrBtn = document.createElement('button');
+    clrBtn.className = 'perc-row-ctrl-btn';
+    clrBtn.textContent = '\u2715';
+    clrBtn.title = 'クリア';
+    clrBtn.style.cssText = 'margin-left:.2rem';
+    clrBtn.addEventListener('click', () => percClearTrack(trackIdx));
+
+    // REV ボタン（トラックごと）
+    const revBtn = document.createElement('button');
+    revBtn.className = 'perc-rev-btn';
+    revBtn.id = 'rev-btn-' + trackIdx;
+    revBtn.textContent = '\u25C4 REV';
+    revBtn.title = '逆再生';
+    revBtn.addEventListener('click', () => percTrackReverse(trackIdx));
+
+    rowCtrl.append(revBtn, randLabel, randSlider, randBtn, euclidLabel, euclidSlider, euclidBtn, clrBtn);
+    row.appendChild(rowCtrl);
+    grid.appendChild(row);
+  });
+}
+
+// パッドクリック（STEPモード: ON/OFFトグル / CHAOSモード: 確率を25%ずつ増加）
+function percPadClick(track, step) {
+  if (percState.mode === 'step') {
+    percState.steps[track][step] = percState.steps[track][step] ? 0 : 1;
+    percUpdatePad(track, step);
+    send({ address: '/matoma/perc/step', args: [track, step, percState.steps[track][step]] });
+    addLog('/perc/step', `track=${track} step=${step} val=${percState.steps[track][step]}`);
+  } else {
+    // CHAOSモード: 確率を25%ずつ循環
+    const cur = percState.probs[track][step];
+    const next = cur >= 100 ? 0 : cur + 25;
+    percState.probs[track][step] = next;
+    percUpdatePad(track, step);
+    send({ address: '/matoma/perc/prob', args: [track, step, next] });
+    addLog('/perc/prob', `track=${track} step=${step} prob=${next}`);
+  }
+}
+
+// パッドのDOM更新
+function percUpdatePad(track, step) {
+  const pad = document.getElementById(`pad-${track}-${step}`);
+  if (!pad) return;
+  const isHead = step === percState.currentStep;
+
+  if (percState.mode === 'step') {
+    const isOn = percState.steps[track][step] === 1;
+    pad.classList.toggle('on', isOn);
+    pad.classList.toggle('playhead', isHead);
+    pad.textContent = '';
+    pad.style.opacity = '1';
+    if (isHead && !isOn) {
+      pad.classList.add('perc-col-highlight');
+    } else {
+      pad.classList.remove('perc-col-highlight');
+    }
+  } else {
+    // CHAOSモード: 確率で明るさとテキスト表示
+    const prob = percState.probs[track][step];
+    const isActive = prob > 0;
+    pad.classList.toggle('on', isActive);
+    pad.classList.toggle('playhead', isHead);
+    pad.classList.remove('perc-col-highlight');
+    pad.textContent = isActive ? String(prob) : '';
+    pad.style.opacity = isActive ? String((0.3 + prob / 100 * 0.7).toFixed(2)) : '0.2';
+    // テキスト配置のためスタイル付与
+    pad.style.display = 'flex';
+    pad.style.alignItems = 'center';
+    pad.style.justifyContent = 'center';
+    pad.style.fontSize = '8px';
+    pad.style.color = '#fff';
+  }
+}
+
+// プレイヘッドの更新
+function percUpdatePlayhead(step) {
+  const prev = percState.currentStep;
+  percState.currentStep = step;
+
+  // 前の列をリセット
+  if (prev >= 0 && prev !== step) {
+    for (let t = 0; t < 4; t++) {
+      const prevPad = document.getElementById(`pad-${t}-${prev}`);
+      if (prevPad) {
+        prevPad.classList.remove('playhead', 'perc-col-highlight');
+      }
+    }
+  }
+
+  // 現在の列をハイライト
+  for (let t = 0; t < 4; t++) {
+    const pad = document.getElementById(`pad-${t}-${step}`);
+    if (!pad) continue;
+    pad.classList.add('playhead');
+    if (percState.mode === 'step' && percState.steps[t][step] === 0) {
+      pad.classList.add('perc-col-highlight');
+    } else {
+      pad.classList.remove('perc-col-highlight');
+    }
+  }
+}
+
+// START
+function percStart() {
+  percState.running = true;
+  document.getElementById('btn-perc-start').classList.add('start-on');
+  send({ address: '/matoma/perc/start', args: [] });
+  addLog('/perc', 'START');
+}
+
+// STOP
+function percStop() {
+  percState.running = false;
+  percState.currentStep = -1;
+  document.getElementById('btn-perc-start').classList.remove('start-on');
+  // 全パッドのプレイヘッドをクリア
+  for (let t = 0; t < 4; t++) {
+    for (let s = 0; s < 16; s++) {
+      const pad = document.getElementById(`pad-${t}-${s}`);
+      if (pad) {
+        pad.classList.remove('playhead', 'perc-col-highlight');
+      }
+    }
+  }
+  send({ address: '/matoma/perc/stop', args: [] });
+  addLog('/perc', 'STOP');
+}
+
+// STEPモード / CHAOSモード切替
+function percSetMode(mode) {
+  percState.mode = mode;
+  const stepBtn  = document.getElementById('btn-perc-step');
+  const chaosBtn = document.getElementById('btn-perc-chaos');
+  if (mode === 'step') {
+    stepBtn.style.cssText  = 'border-color:var(--c-drums);color:var(--c-drums)';
+    chaosBtn.style.cssText = '';
+    chaosBtn.classList.remove('mode-on');
+  } else {
+    stepBtn.style.cssText  = '';
+    chaosBtn.classList.add('mode-on');
+  }
+  // 全パッド表示を更新
+  for (let t = 0; t < 4; t++) {
+    for (let s = 0; s < 16; s++) {
+      percUpdatePad(t, s);
+    }
+  }
+  addLog('/perc/mode', mode);
+}
+
+// 逆再生トグル（グローバル、後方互換）
+function percToggleReverse() {
+  percState.reversed = !percState.reversed;
+  send({ address: '/matoma/perc/reverse', args: [percState.reversed ? 1 : 0] });
+  addLog('/perc/reverse', percState.reversed ? 'ON' : 'OFF');
+}
+
+// トラックごとのREVERSEトグル
+function percTrackReverse(track) {
+  percState.trackReverse[track] = !percState.trackReverse[track];
+  const btn = document.getElementById('rev-btn-' + track);
+  if (btn) btn.classList.toggle('on', percState.trackReverse[track]);
+  send({ address: '/matoma/perc/track/reverse', args: [track, percState.trackReverse[track] ? 1 : 0] });
+  addLog('/perc/track/reverse', `track=${track} val=${percState.trackReverse[track] ? 1 : 0}`);
+}
+
+// ── PERCUSSION CHAOS ENGINE ───────────────────────────────
+function chaosPStart() {
+  percChaosState.running = true;
+  const btn = document.getElementById('btn-chaos-start');
+  if (btn) { btn.style.borderColor = 'var(--c-drums)'; btn.style.color = 'var(--c-drums)'; }
+  send({ address: '/matoma/perc/chaos/start', args: [] });
+  addLog('/perc/chaos', 'START');
+}
+
+function chaosPStop() {
+  percChaosState.running = false;
+  const btn = document.getElementById('btn-chaos-start');
+  if (btn) { btn.style.borderColor = ''; btn.style.color = ''; }
+  send({ address: '/matoma/perc/chaos/stop', args: [] });
+  addLog('/perc/chaos', 'STOP');
+}
+
+function chaosPDensity(val) {
+  percChaosState.density = parseFloat(val);
+  const el = document.getElementById('v-chaos-density');
+  if (el) el.textContent = percChaosState.density.toFixed(1) + '/s';
+  send({ address: '/matoma/perc/chaos/density', args: [percChaosState.density] });
+}
+
+function chaosPAmp(val) {
+  percChaosState.amp = parseFloat(val);
+  const el = document.getElementById('v-chaos-amp');
+  if (el) el.textContent = percChaosState.amp.toFixed(2);
+  send({ address: '/matoma/perc/chaos/amp', args: [percChaosState.amp] });
+}
+
+function chaosPFilter(val) {
+  percChaosState.filter = parseFloat(val);
+  const el = document.getElementById('v-chaos-filter');
+  if (el) el.textContent = Math.round(percChaosState.filter) + 'Hz';
+  send({ address: '/matoma/perc/chaos/filter', args: [percChaosState.filter] });
+}
+
+function chaosPWeights() {
+  const ids = ['s-chaos-w0', 's-chaos-w1', 's-chaos-w2', 's-chaos-w3'];
+  percChaosState.weights = ids.map(id => {
+    const el = document.getElementById(id);
+    return el ? parseFloat(el.value) : 0;
+  });
+  const [k, s, h, c] = percChaosState.weights;
+  send({ address: '/matoma/perc/chaos/weights', args: [k, s, h, c] });
+}
+
+// スキャッター（全トラックの確率をランダム化）
+function percScatter() {
+  send({ address: '/matoma/perc/scatter', args: [-1] });
+  // CHAOSモードでは確率をランダムに設定してUI更新
+  for (let t = 0; t < 4; t++) {
+    for (let s = 0; s < 16; s++) {
+      percState.probs[t][s] = [0, 25, 50, 75, 100][Math.floor(Math.random() * 5)];
+    }
+  }
+  if (percState.mode === 'chaos') {
+    for (let t = 0; t < 4; t++) {
+      for (let s = 0; s < 16; s++) {
+        percUpdatePad(t, s);
+      }
+    }
+  }
+  addLog('/perc/scatter', 'ALL');
+}
+
+// ランダムパターン生成
+function percRandomize(track) {
+  const sliderEl = document.getElementById(`s-rand-${track}`);
+  const density = sliderEl ? parseFloat(sliderEl.value) : 0.5;
+  send({ address: '/matoma/perc/randomize', args: [track, density] });
+  addLog('/perc/randomize', `track=${track} density=${density.toFixed(2)}`);
+}
+
+// ユークリッドリズム生成
+function percEuclid(track) {
+  const sliderEl = document.getElementById(`s-euclid-${track}`);
+  const hits = sliderEl ? parseInt(sliderEl.value, 10) : 4;
+  send({ address: '/matoma/perc/euclid', args: [track, hits] });
+  addLog('/perc/euclid', `track=${track} hits=${hits}`);
+}
+
+// トラッククリア
+function percClearTrack(track) {
+  percState.steps[track].fill(0);
+  percState.probs[track].fill(100);
+  for (let s = 0; s < 16; s++) {
+    percUpdatePad(track, s);
+  }
+  send({ address: '/matoma/perc/clear', args: [track] });
+  addLog('/perc/clear', `track=${track}`);
+}
+
+// BPM変更
+function percBpmChange(raw) {
+  const val = Math.round(parseFloat(raw));
+  percState.bpm = val;
+  const el = document.getElementById('v-perc-bpm');
+  if (el) el.textContent = val;
+  send({ address: '/matoma/perc/bpm', args: [val] });
+}
+
+// フィルター変更
+function percFilterChange() {
+  const cutoff = parseFloat(document.getElementById('s-perc-cutoff').value);
+  const res    = parseFloat(document.getElementById('s-perc-res').value);
+  percState.cutoff = cutoff;
+  percState.res    = res;
+  const vc = document.getElementById('v-perc-cutoff');
+  const vr = document.getElementById('v-perc-res');
+  if (vc) vc.textContent = Math.round(cutoff);
+  if (vr) vr.textContent = res.toFixed(2);
+  send({ address: '/matoma/perc/filter', args: [cutoff, res] });
+}
+
+// ── DRONE GENERATORS ─────────────────────────────────────────
+// 起動中のドローンタイプを管理するSet
+const dgActive = new Set();
+
+function dgStart(type) {
+  send({ address: `/matoma/drone/${type}/start`, args: [] });
+  dgActive.add(type);
+  const btn = document.getElementById(`dgbtn-${type}-start`);
+  if (btn) btn.classList.add('start-on');
+  addLog(`/drone/${type}`, 'START');
+}
+
+function dgStop(type) {
+  send({ address: `/matoma/drone/${type}/stop`, args: [] });
+  dgActive.delete(type);
+  const btn = document.getElementById(`dgbtn-${type}-start`);
+  if (btn) btn.classList.remove('start-on');
+  addLog(`/drone/${type}`, 'STOP');
+}
+
+function dgSend(type, param, rawVal, vidId, fmt) {
+  const v = parseFloat(rawVal);
+  const el = document.getElementById(vidId);
+  if (el) el.textContent = fmt(v);
+  send({ address: `/matoma/drone/${type}/param`, args: [param, v] });
+}
+
+function dgStopAll() {
+  send({ address: '/matoma/drone/all/stop', args: [] });
+  ['fm', 'noise', 'wavetable', 'feedback', 'sines'].forEach(type => {
+    dgActive.delete(type);
+    const btn = document.getElementById(`dgbtn-${type}-start`);
+    if (btn) btn.classList.remove('start-on');
+  });
+  addLog('/drone', 'ALL STOP');
+}
+
+// ── INIT ──────────────────────────────────────────────────
+percBuildGrid();
+connect();
+</script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-<!-- Generated: 2026-04-04 (updated) | Files scanned: 11 Python files | Token estimate: ~1000 -->
+<!-- Generated: 2026-04-05 (updated) | 3層制御システム移行完了 | ThreeLayerController 採用 -->
 # Backend Architecture
 
 ## Entry Point
@@ -8,7 +8,7 @@
 ## OSC Routes (SC → Python, port 9000)
 
 ```
-/matoma/ready            → SC起動完了通知 → broadcast("sc_ready")
+/matoma/ready            → SC起動完了通知 → broadcast("sc_ready") + controller.start()
 /matoma/seq/tick         → シーケンサーステップ → broadcast("seq_tick")
 /matoma/granular/density → グレイン密度 → broadcast("granular_density")
 /matoma/rhythmic/trigger → rhythmic シンセトリガー → broadcast("rhythmic_trigger")
@@ -19,7 +19,7 @@
 
 ```
 # シーン・基本制御
-/matoma/scene                  → scenes.py.get_scene() → OSC複数送信
+/matoma/scene                  → scenes.py.get_scene() → controller.set_scene()
 /matoma/param                  → sc_client → /matoma/param
 /matoma/all/stop               → s.freeAll
 /matoma/all/restart            → SC再起動
@@ -33,25 +33,25 @@
 /matoma/gran_synth/param       → sc_client
 /matoma/gran_sampler/browse    → macOSファイル選択ダイアログ
 
-# ChaosEngine制御
-/matoma/chaos/start            → chaos_engine.start()
-/matoma/chaos/stop             → chaos_engine.stop()
-/matoma/chaos/state            → chaos_engine.get_state() → broadcast
-/matoma/chaos/attractor        → chaos_engine.set_attractor(layer, param, value)
-/matoma/chaos/speed            → chaos_engine.set_speed(value)
-/matoma/chaos/dejavu           → chaos_engine.set_dejavu_prob(prob)
+# 3層制御システム（ThreeLayerController）
+/matoma/chaos/start            → controller.start()
+/matoma/chaos/stop             → controller.stop()
+/matoma/chaos/state            → controller.get_state() → broadcast
+/matoma/chaos/attractor        → controller.set_attractor(layer, param, value, range)
+/matoma/chaos/speed            → controller.set_speed(value)
+/matoma/chaos/dejavu           → controller.set_dejavu_prob(prob)
 
-# Markov上位レイヤー
-/matoma/markov/start           → markov.start()
-/matoma/markov/stop            → markov.stop()
-/matoma/markov/interval        → markov.set_interval(seconds)
-/matoma/markov/state           → markov.get_state() → broadcast
+# Markov上位レイヤー（UpperLayer）
+/matoma/markov/start           → controller.start_markov()
+/matoma/markov/stop            → controller.stop_markov()
+/matoma/markov/interval        → controller.set_markov_interval(seconds)
+/matoma/markov/state           → controller.get_markov_state() → broadcast
 
-# ランダマイズモデル選択
-/matoma/layer/middle/model     → chaos_engine.set_middle_model(name)
-/matoma/layer/lower/model      → chaos_engine.set_lower_model(name)
-/matoma/layer/middle/chaos     → chaos_engine.set_middle_chaos(ratio)  ★新規
-/matoma/layer/lower/chaos      → chaos_engine.set_lower_chaos(ratio)   ★新規
+# ランダマイズモデル選択（現バージョンは固定実装）
+/matoma/layer/middle/model     → controller.set_middle_model(name)  — BoundedWalk固定
+/matoma/layer/lower/model      → controller.set_lower_model(name)   — Dejavu固定
+/matoma/layer/middle/chaos     → controller.set_middle_chaos(ratio) — speed変換
+/matoma/layer/lower/chaos      → controller.set_lower_chaos(ratio)  — dejavu_prob変換
 
 # その他
 /matoma/audio/get_devices      → pyaudio → broadcast(device_list)
@@ -68,53 +68,56 @@
 bridge.py (1110行)
   ├── start_sc()                — sclang起動・bootstrap
   ├── ws_handler()              — WebSocket接続管理・ルーティング
-  ├── on_osc_message()          — SC→Python OSC受信
+  ├── on_osc_message()          — SC→Python OSC受信（/matoma/ready で controller自動起動）
   ├── broadcast()               — 全クライアントWS送信
+  ├── _send_osc()               — SC へ OSC 送信（Studio Mode 用ブロードキャスト付き）
   ├── _handle_tidal()           — Tidal Cyclesコマンド処理
   ├── _handle_granular_browse() — macOSファイル選択
   ├── _convert_mp3_to_wav()     — MP3→WAV変換 (ffmpeg)
   ├── _acquire_pid_lock()       — 多重起動防止
-  └── Global: chaos_engine, markov, autonomous, tidal, sequencer
+  └── Global: controller, autonomous, tidal, sequencer, musical
 
-markov_timescale.py (359行) — class MarkovTimescale
-  ├── __init__(chaos_engine, broadcast, interval, tidal_controller)
-  ├── start() / stop()
-  ├── set_interval(seconds)
-  ├── get_state() → {running, state, interval, elapsed, remaining, speed, dejavu_prob}
-  ├── _loop()                   — 1秒ごとカウントダウン + broadcast
-  ├── _next_state()             — Markov 70% + エネルギーフィードバック 30%
-  ├── _compute_energy()         — 4ソース加重平均（gran×0.30, synth×0.25, sampler×0.25, drone×0.20）
-  └── _apply_state(state)       — 引力点 + speed/dejavu_prob → ChaosEngine + Tidal自動切換え
-  定数: STATES×5, STATE_ATTRACTORS, STATE_GLOBALS, BASE_MATRIX, TIDAL_PRESET_BY_STATE
+three_layer_controller.py (720行) — 3層制御システム（ChaosEngine+MarkovTimescale統合版）
+  ├── class ThreeLayerController
+  │   ├── __init__(send_osc, broadcast, tidal_controller, interval=60.0)
+  │   ├── start() / stop()
+  │   ├── start_markov() / stop_markov() / set_markov_interval() / get_markov_state()
+  │   ├── set_attractor(layer, param, value, range_val)
+  │   ├── set_speed(speed)      — 全パラメーターのドリフト速度
+  │   ├── set_dejavu_prob(prob) — 全パラメーターのDejavu確率
+  │   ├── set_middle_model / set_lower_model — モデル切り替え（現バージョン固定）
+  │   ├── set_middle_chaos / set_lower_chaos — カオス比率（speed/dejavu_prob変換）
+  │   ├── set_scene(scene)      — シーン定義からゾーン中心を設定
+  │   ├── get_state()           — 全パラメーター状態（UI用）
+  │   ├── _compute_energy()     — 4ソース加重平均（gran×0.30, synth×0.25, sampler×0.25, drone×0.20）
+  │   ├── _loop() / _tick()     — 0.1秒ごとに全パラメーター更新 + OSC送信
+  │   └── _params: {layer: {param: _ParamState(current, middle, osc_address)}}
+  │
+  ├── class UpperLayer          — Markov状態機械（60秒ごと5状態遷移）
+  │   ├── get_control(layer, param) → UpperControl(center, width, speed, snap_prob, micro_range, floor, ceiling)
+  │   ├── get_state_info()      — フロントエンド用状態（markov_state メッセージ）
+  │   ├── set_zone_override(layer, param, center, width) — 手動引力点調整
+  │   ├── clear_zone_override / set_speed_override / set_snap_override
+  │   ├── set_interval(seconds) / start() / stop()
+  │   ├── _loop()               — 1秒ごとカウントダウン + broadcast
+  │   ├── _next_state()         — Markov 70% + エネルギーフィードバック 30%
+  │   └── _apply_tidal(state)   — TIDAL_PRESET_BY_STATE から自動切換え
+  │
+  ├── _middle_next(current, ctrl) → float
+  │   └── BoundedWalk: Upper ゾーンの center に引き寄せられながらドリフト
+  │
+  └── _lower_next(middle, ctrl, history) → float
+      └── Dejavu: middle 周辺で微変動 + snap_prob で過去値へスナップバック
+
+  定数:
+    PARAM_SPECS         — {layer: {param: (min, max, init, osc_address)}}
+    STATE_ZONES         — {state: {layer: {param: {"center": float, "width": float}}}}
+    STATE_CONTROLS      — {state: {"speed": float, "snap_prob": float, "micro_ratio": float}}
+    BASE_MATRIX         — {state: [prob_to_void, prob_to_sparse, ...]}
+    TIDAL_PRESET_BY_STATE — {state: preset_name}
 
 autonomous.py (716行)
-  ├── class AutonomousMode      — 旧自律モード（非推奨。ChaosEngineに移行）
-  └── class ChaosEngine         — 確率的パラメーター変化エンジン
-      ├── start() / stop()
-      ├── set_attractor(layer, param, value)
-      ├── set_speed(speed)
-      ├── set_dejavu_prob(prob)  — duck typing で DynamicBlendLower にも委譲
-      ├── set_middle_model(name) — bounded_walk/fractal/lsystem/blend
-      ├── set_lower_model(name)  — dejavu/bounded_walk/lsystem/blend
-      ├── set_lower_chaos(ratio) — DynamicBlendLower.set_ratio() へ委譲
-      ├── set_middle_chaos(ratio)— DynamicBlendMiddle.set_ratio() へ委譲
-      ├── set_scene(scene)
-      └── get_state() → {layer: {param: {value, attractor, ...}}}
-
-randomize_models.py (405行)  ★新規
-  ├── Protocol RandomizeModel   — next_value(current, attractor, lo, hi) → float
-  ├── BoundedWalkModel          — 引力点へのドリフト + ランダム摂動
-  ├── DejavuModel               — 過去状態への確率的スナップバック
-  ├── FractalModel              — 1/fノイズ（複数正弦波重ね合わせ）
-  ├── LSystemModel              — フレーズ蓄積 + ルール変換による次値予測
-  ├── DynamicBlendLower         — Dejavu↔BoundedWalk 動的ブレンド ★新規
-  │   ├── set_ratio(0〜1)       — 0=Dejavu, 1=BoundedWalk
-  │   └── set_snap_prob()       — 内部DejavuModelへ委譲
-  ├── DynamicBlendMiddle        — LSystem↔BoundedWalk 動的ブレンド ★新規
-  │   └── set_ratio(0〜1)       — 0=LSystem, 1=BoundedWalk
-  ├── blend(models, weights, ...) — 重み付き平均関数
-  ├── _make_middle(name)        — モデル名→中位モデルインスタンス
-  └── _make_lower(name)         — モデル名→下位モデルインスタンス
+  └── class AutonomousMode      — 旧自律モード（非推奨。ThreeLayerControllerに移行）
 
 scenes.py (130行)
   ├── load_scenes()
@@ -135,6 +138,7 @@ tidal_controller.py (224行) — class TidalController
   └── hush()
 
 tidal_patterns.py (244行) — パターン生成ヘルパー関数群
+  └── get_preset(preset_name) → [code_str, ...]
 
 claude_tidal.py (250行) — Claude API統合
   ├── retrieve_rag_context(prompt) — ChromaDB検索
@@ -143,25 +147,42 @@ claude_tidal.py (250行) — Claude API統合
 param_mapper.py (129行) — パラメーター正規化・マッピング
 
 turing_gene.py (285行) — 遺伝的アルゴリズムによるパターン進化
+
+musical_control.py — MusicalControl（Tidalとの統合制御）
 ```
 
 ## 3層タイムスケールアーキテクチャ
 
 ```
-MarkovTimescale（上位, 30s〜5min）
-  状態: void / sparse / medium / dense / intense
+UpperLayer（上位, 60秒 Markov）
+  状態: void / sparse / medium / dense / intense（5状態）
   制御: Markov 70% + エネルギーフィードバック 30%
-        ↓ 引力点 + speed/dejavu_prob を設定
+        ↓ center/width/speed/snap_prob/micro_range を Middle/Lower へ渡す
         ↓ Tidalプリセット自動切換え（TIDAL_PRESET_BY_STATE）
 ─────────────────────────────────────────────
-ChaosEngine._middle_model（中位, 2s〜16拍）
-  選択: BoundedWalk / Fractal / LSystem / DynamicBlendMiddle
-  人間制御: REPEAT↔CHAOS スライダー（0=LSystem, 1=BoundedWalk）
+_middle_next（中位, 0.1秒更新）
+  アルゴリズム: BoundedWalk（固定実装）
+  動作: Upper の center に引き寄せられながら width 内をドリフト
+  入力: current, UpperControl(center, width, speed, floor, ceiling)
+  出力: 新しい middle 値（Lower の参照点）
 ─────────────────────────────────────────────
-ChaosEngine._lower_model（下位, 0.1s〜2拍）
-  選択: Dejavu / BoundedWalk / LSystem / DynamicBlendLower
-  人間制御: REPEAT↔CHAOS スライダー（0=Dejavu, 1=BoundedWalk）
-  Markov制御: dejavu_prob（set_snap_prob経由で委譲）
+_lower_next（下位, 0.1秒更新）
+  アルゴリズム: Dejavu（固定実装）
+  動作: middle ± micro_range で微変動、snap_prob で過去値へスナップバック
+  入力: middle, UpperControl(snap_prob, micro_range, floor, ceiling), history
+  出力: 新しい current 値 → OSC 送信
+```
+
+## 制御フロー
+
+```
+1. Upper._loop() — 60秒ごとに Markov 遷移、STATE_ZONES/STATE_CONTROLS から UpperControl 生成
+2. ThreeLayerController._tick() — 0.1秒ごと全パラメーターを更新
+   a. ctrl = upper.get_control(layer, param)  — center/width/speed/snap_prob/micro_range取得
+   b. new_middle = _middle_next(state.middle, ctrl)  — Middle: center へドリフト
+   c. new_current = _lower_next(new_middle, ctrl, history)  — Lower: middle 周辺で微変動
+   d. _send_osc(osc_address, [param, new_current])  — SC へ送信
+   e. broadcast({"type": "chaos_state", "state": get_state()})  — UI更新
 ```
 
 ## Global State (bridge.py)
@@ -169,10 +190,144 @@ ChaosEngine._lower_model（下位, 0.1s〜2拍）
 ```python
 connected_clients: set[WebSocket]
 sc_client: SimpleUDPClient          # SC送信 (OSC/UDP, port 57120)
-chaos_engine: ChaosEngine           # メインエンジン（4レイヤー: gran/drone/synth/sampler）
-markov: MarkovTimescale(chaos_engine, broadcast, tidal_controller=tidal)
+controller: ThreeLayerController    # 3層制御システム（upper+middle+lower統合）
+                                    # 初期化: ThreeLayerController(_send_osc, broadcast, tidal_controller=tidal)
+                                    # 起動: SC起動完了時 (/matoma/ready 受信) に controller.start() 自動実行
 autonomous: AutonomousMode          # 旧自律モード（非推奨）
 tidal: TidalController
 sequencer: TuringSequencer
+musical: MusicalControl(tidal, broadcast, lambda: controller._upper._state)
 sc_ready: bool
+```
+
+## bridge.py と ThreeLayerController の連携
+
+```python
+# 初期化（bridge.py 内、main() 関数）
+controller = ThreeLayerController(
+    send_osc=_send_osc,              # _send_osc(address, args) → sc_client.send_message() + broadcast(studio_mode用)
+    broadcast=broadcast,              # WebSocketクライアント全体へブロードキャスト
+    tidal_controller=tidal,           # UpperLayer が状態遷移時に Tidal プリセット自動切換え
+    interval=60.0                     # Markov 状態遷移間隔（デフォルト60秒）
+)
+
+# SC起動完了時の自動起動（on_osc_message 内）
+@dispatcher.map("/matoma/ready")
+def ready_handler(address, *args):
+    global sc_ready
+    sc_ready = True
+    if controller is not None:
+        controller.start()  # → 0.1秒ごとのパラメーター更新ループ開始 + Markov開始
+        log.info("ThreeLayerController 自動スタート")
+
+# WebSocket経由の手動制御（ws_handler 内）
+/matoma/chaos/start      → controller.start()
+/matoma/chaos/stop       → controller.stop()
+/matoma/chaos/attractor  → controller.set_attractor(layer, param, value, range_val)
+/matoma/markov/start     → controller.start_markov()
+/matoma/markov/stop      → controller.stop_markov()
+/matoma/scene            → controller.set_scene(scene_dict)
+
+# _send_osc の役割
+# 1. SC へ OSC 送信（sc_client.send_message）
+# 2. Studio Mode 用に WebSocket ブロードキャスト（{"type": "studio_osc", "address": ..., "args": ...}）
+```
+
+## 定数定義（three_layer_controller.py）
+
+### PARAM_SPECS
+```python
+{layer: {param: (min_val, max_val, init_val, osc_address)}}
+
+例:
+  "drone": {
+    "feedback_amt": (0.0, 1.0, 0.25, "/matoma/drone/param"),
+    "shimmer":      (0.0, 1.0, 0.40, "/matoma/drone/param"),
+  },
+  "granular": {
+    "density": (1.0, 60.0, 15.0, "/matoma/granular/param"),
+  }
+```
+
+### STATE_ZONES
+```python
+{state: {layer: {param: {"center": float, "width": float}}}}
+
+void 状態の例:
+  "drone": {
+    "feedback_amt": {"center": 0.10, "width": 0.06},  # 0.04〜0.16の範囲でドリフト
+    "amp":          {"center": 0.15, "width": 0.04},
+  }
+
+intense 状態の例:
+  "drone": {
+    "feedback_amt": {"center": 0.45, "width": 0.15},  # 0.30〜0.60の範囲でドリフト
+    "amp":          {"center": 0.65, "width": 0.06},
+  }
+```
+
+### STATE_CONTROLS
+```python
+{state: {"speed": float, "snap_prob": float, "micro_ratio": float}}
+
+void:    speed=0.3,  snap_prob=0.50, micro_ratio=0.15  # ゆっくり、安定的
+sparse:  speed=0.5,  snap_prob=0.40, micro_ratio=0.20
+medium:  speed=0.8,  snap_prob=0.30, micro_ratio=0.25
+dense:   speed=1.2,  snap_prob=0.15, micro_ratio=0.35
+intense: speed=1.8,  snap_prob=0.05, micro_ratio=0.50  # 速く、激しく変動
+
+speed:       Middle のドリフト速度（大きいほど center へ速く引き寄せられる）
+snap_prob:   Lower の Dejavu 確率（過去値へスナップバックする頻度）
+micro_ratio: Lower の微変動幅 = width × micro_ratio
+```
+
+### BASE_MATRIX
+```python
+{state: [prob_to_void, prob_to_sparse, prob_to_medium, prob_to_dense, prob_to_intense]}
+
+void:    [0.40, 0.40, 0.15, 0.04, 0.01]  # void に留まる or sparse へ移行しやすい
+medium:  [0.05, 0.20, 0.40, 0.25, 0.10]  # medium に留まりつつ、dense/sparse へ分散
+intense: [0.05, 0.10, 0.25, 0.40, 0.20]  # intense/dense を維持しやすい
+```
+
+### TIDAL_PRESET_BY_STATE
+```python
+{state: preset_name}
+
+void:    "minimal_klank"   # 最小限の音響
+sparse:  "opn_sparse"      # OPN 風スパース
+medium:  "alva_euclidean"  # Alva Noto 風ユークリッド
+dense:   "alva_phase"      # 密度の高い位相変調
+intense: "chaos_collapse"  # カオス的崩壊
+```
+
+## データフロー図
+
+```
+ユーザー操作（UI）
+    ↓
+WebSocket → bridge.py → controller.set_attractor(layer, param, value, range_val)
+                                 ↓
+                         upper.set_zone_override(layer, param, center, width)
+                                 ↓
+─── 60秒ごと ───────────────────────────────────────────────
+upper._loop()
+  _next_state() — Markov 70% + エネルギーフィードバック 30%
+  _apply_tidal(state) — Tidal プリセット自動切換え
+  broadcast({"type": "markov_state", "state": get_state_info()})
+─────────────────────────────────────────────────────────
+─── 0.1秒ごと ──────────────────────────────────────────
+controller._tick()
+  for each param:
+    ctrl = upper.get_control(layer, param)  # center/width/speed/snap_prob/micro_range
+    new_middle = _middle_next(state.middle, ctrl)  # BoundedWalk
+    new_current = _lower_next(new_middle, ctrl, history)  # Dejavu
+    _send_osc(osc_address, [param, new_current])
+  broadcast({"type": "chaos_state", "state": get_state()})
+─────────────────────────────────────────────────────────
+    ↓
+SuperCollider (受信側)
+  SynthDef.drone.set(param, new_current)
+  SynthDef.granular.set(param, new_current)
+  ...
 ```

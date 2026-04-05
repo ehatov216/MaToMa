@@ -86,15 +86,6 @@ def tension_to_internal(tension: float) -> list[tuple[str, list]]:
     ]
 
 
-def mutation_prob_from_chaos(chaos: float) -> float:
-    """CHAOS → TuringGene.mutation_prob の計算式（設計書 セクション6 笛①）。
-
-    OSC コマンドではなく数値で返す（呼び出し元が gene.set_mutation_prob() に渡す）。
-    """
-    c = max(0.0, min(1.0, float(chaos)))
-    return 0.01 + c * 0.29
-
-
 def trig_prob_from_density(density: float) -> float:
     """DENSITY → sequencer.set_trig_prob() の計算式（設計書 セクション6 笛②）。
 

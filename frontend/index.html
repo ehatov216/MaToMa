@@ -10,7 +10,7 @@
   --text:#b8b8cc;--dim:#44445a;--bright:#e0e0f0;
   --c-scene:#4ade80;--c-drone:#60a5fa;--c-gran:#fb923c;
   --c-rhythmic:#f43f5e;--c-auto:#a78bfa;--c-warn:#fbbf24;
-  --c-drop:#f472b6;--c-energy:#fbbf24;--c-turing:#818cf8;
+  --c-energy:#fbbf24;
   --c-glitch:#ff4466;--c-tidal:#2dd4bf;
 }
 body{background:var(--bg);color:var(--text);
@@ -64,31 +64,6 @@ select#device-select{background:var(--bg3);border:1px solid var(--border);
   background:#0a1a0e;box-shadow:0 0 8px rgba(74,222,128,.12)}
 .scene-hint{font-size:.57rem;color:var(--dim);text-align:center;
   margin-top:.25rem;line-height:1.4}
-
-/* ── DROP BUTTONS ── */
-.drop-list{display:grid;grid-template-columns:1fr 1fr;gap:.28rem}
-.dropbtn{padding:.4rem .25rem;font-family:inherit;font-size:.65rem;
-  font-weight:bold;border-radius:3px;border:1px solid var(--border);
-  background:var(--bg3);color:var(--dim);cursor:pointer;
-  text-align:center;transition:all .12s;letter-spacing:.04em}
-.dropbtn:hover{background:#1a1224;color:var(--text)}
-.dropbtn.on{border-color:var(--c-drop);color:var(--c-drop);
-  background:#1a0a14;box-shadow:0 0 8px rgba(244,114,182,.12)}
-
-/* ── TURING GENE ── */
-.turing-btns{display:flex;gap:.3rem;margin-bottom:.38rem}
-.turing-btn{flex:1;padding:.35rem .25rem;font-family:inherit;font-size:.65rem;
-  border-radius:3px;border:1px solid var(--border);background:transparent;
-  color:var(--dim);cursor:pointer;text-align:center;transition:all .12s}
-.turing-btn:hover{background:var(--bg3);color:var(--text)}
-.turing-btn.on{border-color:var(--c-turing);color:var(--c-turing);background:#0e0e1a}
-.turing-reg{display:flex;gap:2px;margin-bottom:.3rem;flex-wrap:wrap}
-.turing-bit{width:11px;height:11px;border-radius:1px;flex-shrink:0;
-  transition:background .2s}
-.turing-bit.hi{background:var(--c-turing)}
-.turing-bit.lo{background:var(--border)}
-.turing-info{font-size:.6rem;color:var(--c-turing);
-  font-variant-numeric:tabular-nums}
 
 /* ── SLIDER ROW ── */
 .sr{display:grid;grid-template-columns:64px 1fr 40px;
@@ -228,6 +203,44 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
 .le .lt{color:#2a2a3a;flex-shrink:0}
 .le .la{color:var(--c-drone)}
 .le .lv{color:var(--c-warn)}
+
+/* ── STUDIO MODE ────────────────────────────────────────── */
+.mode-tabs{display:flex;gap:.3rem;margin-left:auto}
+.tab-btn{padding:.28rem .65rem;font-family:inherit;font-size:.68rem;
+  letter-spacing:.06em;border-radius:3px;border:1px solid var(--border);
+  background:transparent;cursor:pointer;color:var(--dim);transition:all .15s}
+.tab-btn:hover{color:var(--text);border-color:var(--text)}
+.tab-btn.active{border-color:var(--c-auto);color:var(--c-auto);background:#13101a}
+#studio-view{padding:.5rem;display:none;flex-direction:column;gap:.5rem}
+.studio-statusbar{background:var(--bg2);border:1px solid var(--border);
+  border-radius:4px;padding:.3rem .7rem;display:flex;align-items:center;gap:1.2rem;flex-wrap:wrap}
+.sc-hb-dot{display:inline-block;width:7px;height:7px;border-radius:50%;
+  background:#222;flex-shrink:0;vertical-align:middle;margin-right:.25rem;transition:background .3s}
+.sc-hb-dot.alive{background:var(--c-scene);box-shadow:0 0 5px var(--c-scene)}
+.sc-hb-dot.stale{background:var(--c-warn);box-shadow:0 0 5px var(--c-warn)}
+.sc-hb-dot.dead {background:#f87171;box-shadow:0 0 5px #f87171}
+.studio-stat-item{font-size:.63rem;color:var(--dim)}
+.studio-signal-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem}
+.studio-section{background:var(--bg2);border:1px solid var(--border);border-radius:4px;overflow:hidden}
+.studio-sec-hdr{padding:.25rem .6rem;border-bottom:1px solid var(--border);
+  font-size:.63rem;font-weight:bold;letter-spacing:.12em;color:var(--bright)}
+.studio-sec-body{padding:.4rem .6rem}
+.spark-row{display:flex;align-items:center;gap:.35rem;margin-bottom:.26rem}
+.spark-row:last-child{margin-bottom:0}
+.spark-label{font-size:.57rem;color:var(--dim);min-width:78px;flex-shrink:0}
+.sparkline{flex:1;height:20px;border-radius:2px;display:block;background:var(--bg3);min-width:80px}
+.spark-val{font-size:.57rem;color:var(--c-warn);min-width:38px;
+  text-align:right;font-variant-numeric:tabular-nums;flex-shrink:0}
+.studio-osc-section{background:var(--bg2);border:1px solid var(--border);border-radius:4px;overflow:hidden}
+.studio-osc-hdr{padding:.25rem .6rem;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:.6rem}
+.studio-osc-hdr-label{font-size:.63rem;font-weight:bold;letter-spacing:.12em;color:var(--bright)}
+#osc-log-body{max-height:160px;overflow-y:auto;padding:.3rem .6rem;display:flex;flex-direction:column}
+.osc-log-entry{display:flex;gap:.5rem;margin:.04rem 0;font-size:.58rem;
+  font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden}
+.osc-ts{color:#2a2a3a;flex-shrink:0}
+.osc-addr{color:var(--c-drone);flex-shrink:0}
+.osc-args{color:var(--c-warn);opacity:.8;overflow:hidden;text-overflow:ellipsis}
 </style>
 </head>
 <body>
@@ -248,11 +261,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
     style="border-color:#f87171;color:#f87171" onclick="stopAll()">■ STOP ALL</button>
   <button class="hbtn" id="btn-restart"
     style="border-color:#60a5fa;color:#60a5fa" onclick="restartAll()">↺ RESTART</button>
+  <div class="mode-tabs">
+    <button class="tab-btn active" id="tab-live"   onclick="switchMode('live')">LIVE</button>
+    <button class="tab-btn"        id="tab-studio" onclick="switchMode('studio')">STUDIO</button>
+  </div>
 </header>
 
 <main id="console">
 
-  <!-- LEFT: SCENE + DROP + TURING -->
+  <!-- LEFT: SCENE -->
   <div id="left-col">
 
     <!-- SCENE -->
@@ -269,45 +286,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
           <button class="scbtn" id="scb-lost" onclick="selectScene('lost')">lost</button>
         </div>
         <div class="scene-hint">1〜4 キーでも切替</div>
-      </div>
-    </div>
-
-    <!-- DROP -->
-    <div class="mod">
-      <div class="mhdr">
-        <div class="mbar" style="background:var(--c-drop)"></div>
-        <div class="mname">DROP</div>
-      </div>
-      <div class="mbody">
-        <div class="drop-list">
-          <button class="dropbtn" id="db-break"    onclick="selectDrop('break')">break</button>
-          <button class="dropbtn" id="db-build-up" onclick="selectDrop('build-up')">build-up</button>
-          <button class="dropbtn" id="db-drop"     onclick="selectDrop('drop')">drop</button>
-          <button class="dropbtn" id="db-anti-drop" onclick="selectDrop('anti-drop')">anti-drop</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- TURING GENE -->
-    <div class="mod">
-      <div class="mhdr">
-        <div class="mbar" style="background:var(--c-turing)"></div>
-        <div class="mname">TURING</div>
-        <span id="turing-status" style="font-size:.57rem;color:var(--dim);margin-left:.3rem">停止</span>
-      </div>
-      <div class="mbody">
-        <div class="turing-btns">
-          <button class="turing-btn" id="btn-turing-toggle" onclick="turingToggle()">▶ START</button>
-        </div>
-        <div class="turing-reg" id="turing-reg"></div>
-        <div class="turing-info" id="turing-info">—</div>
-        <div class="sr" style="--thumb:var(--c-turing);margin-top:.4rem">
-          <div class="sl"><b>SPEED</b></div>
-          <input type="range" min="1" max="16" step="1" value="8"
-            id="s-tur-bars"
-            oninput="turingBars(+this.value)">
-          <div class="sv" id="v-tur-bars">8 bars</div>
-        </div>
       </div>
     </div>
 
@@ -947,27 +925,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
           </div>
         </div>
 
-        <div class="msub" style="margin-top:.4rem">TURING</div>
-        <div class="chaos-row">
-          <div class="chaos-hd">
-            <span class="chaos-key">mutation_prob</span>
-            <span class="chaos-val" id="cv-turing-mutation">—</span>
-          </div>
-          <div class="chaos-bar-wrap">
-            <div class="chaos-bar" id="cb-turing-mutation"
-              style="width:0%;background:var(--c-turing)"></div>
-          </div>
-        </div>
-        <div class="chaos-row">
-          <div class="chaos-hd">
-            <span class="chaos-key">current_hz</span>
-            <span class="chaos-val" id="cv-turing-hz">—</span>
-          </div>
-          <div class="chaos-bar-wrap">
-            <div class="chaos-bar" id="cb-turing-hz"
-              style="width:0%;background:var(--c-turing)"></div>
-          </div>
-        </div>
       </div>
     </div>
   </div><!-- #right-col -->
@@ -1078,15 +1035,52 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
 
 </main>
 
+<!-- STUDIO MODE VIEW -->
+<div id="studio-view">
+  <div class="studio-statusbar">
+    <span class="studio-stat-item">
+      <span class="sc-hb-dot" id="sc-hb-dot"></span>
+      SC&nbsp;<span id="sc-hb-text" style="color:var(--dim)">未受信</span>
+    </span>
+    <span class="studio-stat-item">Markov: <span id="studio-markov-state" style="color:#9b59b6;font-weight:bold">—</span></span>
+    <span id="osc-log-rate" class="studio-stat-item">OSC: — msg/s</span>
+    <span class="studio-stat-item" style="font-size:.56rem;color:var(--dim);margin-left:auto">ThreeLayerController → OSC → SuperCollider</span>
+  </div>
+  <div class="studio-signal-grid">
+    <div class="studio-section">
+      <div class="studio-sec-hdr" style="border-left:3px solid var(--c-drone)">DRONE</div>
+      <div class="studio-sec-body" id="studio-drone"></div>
+    </div>
+    <div class="studio-section">
+      <div class="studio-sec-hdr" style="border-left:3px solid var(--c-gran)">GRANULAR · GRAN SYNTH</div>
+      <div class="studio-sec-body" id="studio-gran"></div>
+    </div>
+    <div class="studio-section">
+      <div class="studio-sec-hdr" style="border-left:3px solid #2dd4bf">GRAN SAMPLER</div>
+      <div class="studio-sec-body" id="studio-gsamp"></div>
+    </div>
+  </div>
+  <div class="studio-osc-section">
+    <div class="studio-osc-hdr">
+      <span class="studio-osc-hdr-label">OSC LOG</span>
+      <span style="font-size:.57rem;color:var(--dim)">最近のOSC送信</span>
+    </div>
+    <div id="osc-log-body"></div>
+  </div>
+</div>
+
 <script>
 const WS_URL = 'ws://localhost:8765';
 let ws, reconnectTimer = null, reconnectDelay = 1000;
 let currentScene      = null;
-let currentDrop       = null;
 let freezeOn          = false;
-let turingRunning     = false;
 let currentDroneGen   = null;
 let percRunning       = false;
+let currentMode       = 'live';
+let scHbLastTs        = 0;
+let _oscMsgThisSec    = 0;
+const SPARK_SAMPLES   = 60;
+const sparkBuffers    = {};
 
 // PERC ステップ状態: tracks[trackIdx][stepIdx] = 0|1
 // PERC_TRACKS / percSteps はステップシーケンサー廃止により削除
@@ -1132,14 +1126,11 @@ function handleMessage(m) {
     const name = m.scene && m.scene.name ? m.scene.name : m.scene;
     if (name) highlightScene(String(name));
   }
-  else if (t === 'drop_changed')   { highlightDrop(m.state); }
   else if (t === 'chaos_state' || t === 'autonomous_update') {
     updateChaosState(m.state || m.params || m);
   }
   else if (t === 'chaos_started')  { setChaosRunning(true); }
   else if (t === 'chaos_stopped')  { setChaosRunning(false); }
-  else if (t === 'turing_state')   { updateTuringState(m.state || {}); }
-  else if (t === 'turing_tick')    { updateTuringState(m); }
   else if (t === 'audio_devices')  { updateDeviceSelect(m.current || '', m.devices || []); }
   else if (t === 'gran_sampler_file_selected') {
     const name = m.path ? m.path.split('/').pop() : '?';
@@ -1163,6 +1154,8 @@ function handleMessage(m) {
   else if (t === 'tidal_applied')  { tidalPresetApplied(m.preset); addLog('/tidal', 'applied: ' + (m.preset || '')); }
   else if (t === 'tidal_state')    { if (m.state) { setTidalRunning(!!m.state.running); if (m.state.preset) tidalPresetApplied(m.state.preset); } }
   else if (t === 'markov_state')   { updateMarkovState(m.state || {}); }
+  else if (t === 'osc_sent')       { addOscLogEntry(m); }
+  else if (t === 'sc_heartbeat')   { scHbLastTs = m.ts || (Date.now() / 1000); }
   else { addLog(t || m.address || '?', JSON.stringify(m.args || m.params || {})); }
 }
 
@@ -1195,23 +1188,6 @@ function highlightScene(name) {
   SCENES.forEach(s => {
     const b = document.getElementById('scb-' + s);
     if (b) b.classList.toggle('on', s === name);
-  });
-}
-
-// ── DROP ──────────────────────────────────────────────────
-const DROPS = ['break','build-up','drop','anti-drop'];
-
-function selectDrop(state) {
-  send({ address: '/matoma/drop/state', args: [state] });
-  highlightDrop(state);
-  addLog('/drop', state);
-}
-
-function highlightDrop(state) {
-  currentDrop = state;
-  DROPS.forEach(d => {
-    const b = document.getElementById('db-' + d);
-    if (b) b.classList.toggle('on', d === state);
   });
 }
 
@@ -1263,68 +1239,6 @@ function masterSend(rawVal) {
   const v = parseFloat(rawVal);
   document.getElementById('v-master').textContent = v.toFixed(2);
   send({ address: '/matoma/master/amp', args: [v] });
-}
-
-// ── TURING GENE ───────────────────────────────────────────
-function turingBars(bars) {
-  // bars: 1=最速(1小節) 〜 16=最遅(16小節)
-  // 表示は逆順の「速さ」感で分かりやすくする
-  document.getElementById('v-tur-bars').textContent = bars + ' bars';
-  send({ address: '/matoma/turing/mutation_bars', args: [bars] });
-}
-
-function turingToggle() {
-  turingRunning = !turingRunning;
-  const btn = document.getElementById('btn-turing-toggle');
-  const st  = document.getElementById('turing-status');
-  if (turingRunning) {
-    send({ address: '/matoma/turing/start', args: [] });
-    if (btn) { btn.classList.add('on'); btn.textContent = '▶ START'; }
-    if (st)  { st.textContent = '動作中'; st.style.color = 'var(--c-turing)'; }
-    addLog('/turing', 'START');
-  } else {
-    send({ address: '/matoma/turing/stop', args: [] });
-    if (btn) { btn.classList.remove('on'); btn.textContent = '▶ START'; }
-    if (st)  { st.textContent = '停止'; st.style.color = 'var(--dim)'; }
-    addLog('/turing', 'STOP');
-  }
-}
-
-function updateTuringState(state) {
-  if (!state) return;
-  const reg  = document.getElementById('turing-reg');
-  const info = document.getElementById('turing-info');
-
-  if (reg && Array.isArray(state.register)) {
-    reg.innerHTML = '';
-    state.register.forEach(bit => {
-      const d = document.createElement('div');
-      d.className = 'turing-bit ' + (bit ? 'hi' : 'lo');
-      reg.appendChild(d);
-    });
-  }
-  if (info) {
-    const hz  = state.current_hz != null ? state.current_hz.toFixed(1) + ' Hz' : '';
-    const mut = state.mutation_prob != null ? ' μ=' + state.mutation_prob.toFixed(2) : '';
-    info.textContent = hz + mut || '—';
-  }
-
-  // CHAOS STATE の Turing 行も更新
-  const mutBar = document.getElementById('cb-turing-mutation');
-  const mutVal = document.getElementById('cv-turing-mutation');
-  if (state.mutation_prob != null) {
-    const pct = state.mutation_prob * 100 / 0.3; // max 0.3
-    if (mutBar) mutBar.style.width = Math.min(100, pct) + '%';
-    if (mutVal) mutVal.textContent = state.mutation_prob.toFixed(2);
-  }
-  const hzBar = document.getElementById('cb-turing-hz');
-  const hzVal = document.getElementById('cv-turing-hz');
-  if (state.current_hz != null) {
-    // 30〜300 Hz の範囲で表示
-    const pct = ((state.current_hz - 30) / 270) * 100;
-    if (hzBar) hzBar.style.width = Math.max(0, Math.min(100, pct)) + '%';
-    if (hzVal) hzVal.textContent = state.current_hz.toFixed(1) + ' Hz';
-  }
 }
 
 // ── CHAOS ENGINE コントロール ──────────────────────────────
@@ -1418,6 +1332,7 @@ function updateChaosState(params) {
     if (bar) bar.style.width = pct + '%';
     if (vEl) vEl.textContent = u.val.toFixed(2);
   }
+  drawAllSparklines();
 }
 
 function updateChaosBar(key, value, attractor, min, max, fmt) {
@@ -1431,6 +1346,7 @@ function updateChaosBar(key, value, attractor, min, max, fmt) {
     if (attractor != null) { att.style.left = pct(attractor) + '%'; att.style.display = ''; }
     else { att.style.display = 'none'; }
   }
+  if (value != null) studioTrackParam(key, value, min, max, fmt);
 }
 
 // ── 音声デバイス ──────────────────────────────────────────
@@ -1479,11 +1395,6 @@ function stopAll() {
   if (percBtn) percBtn.classList.remove('on');
   const percSt = document.getElementById('perc-status');
   if (percSt) { percSt.textContent = '停止'; percSt.style.color = 'var(--dim)'; }
-  turingRunning = false;
-  const turBtn = document.getElementById('btn-turing-toggle');
-  if (turBtn) turBtn.classList.remove('on');
-  const turSt = document.getElementById('turing-status');
-  if (turSt) { turSt.textContent = '停止'; turSt.style.color = 'var(--dim)'; }
   setMarkovRunning(false);
   addLog('STOP', '全停止');
 }
@@ -1683,6 +1594,7 @@ function updateMarkovState(state) {
     if (bar) bar.style.width = pct + '%';
     if (vEl) vEl.textContent = state.dejavu_prob.toFixed(2);
   }
+  updateStudioMarkov(state);
 }
 
 function tidalToggle() {
@@ -1735,10 +1647,6 @@ document.addEventListener('keydown', e => {
   // 入力フィールドにフォーカス中は無視
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.key >= '1' && e.key <= '4') selectScene(SCENES[parseInt(e.key) - 1]);
-  if (e.key === 'b') selectDrop('break');
-  if (e.key === 'u') selectDrop('build-up');
-  if (e.key === 'd') selectDrop('drop');
-  if (e.key === 'a') selectDrop('anti-drop');
 });
 
 // ── GLITCH SYNTH ──────────────────────────────────────
@@ -1843,7 +1751,158 @@ function granSamplerParam(param, val, vid, dispVal) {
   send({ address: '/matoma/gran_sampler/param', args: [param, val] });
 }
 
+// ── STUDIO MODE ──────────────────────────────────────────────────────
+function switchMode(mode) {
+  currentMode = mode;
+  document.getElementById('console').style.display     = mode === 'live'   ? 'grid' : 'none';
+  document.getElementById('studio-view').style.display = mode === 'studio' ? 'flex' : 'none';
+  document.getElementById('tab-live').classList.toggle('active',   mode === 'live');
+  document.getElementById('tab-studio').classList.toggle('active', mode === 'studio');
+  if (mode === 'studio') drawAllSparklines();
+}
+
+// ── SC HEARTBEAT DISPLAY ─────────────────────────────────────────────
+function tickHeartbeatDisplay() {
+  const dot = document.getElementById('sc-hb-dot');
+  const txt = document.getElementById('sc-hb-text');
+  if (!dot || !txt) return;
+  const now = Date.now() / 1000;
+  const age = scHbLastTs > 0 ? (now - scHbLastTs) : Infinity;
+  if (age < 8) {
+    dot.className = 'sc-hb-dot alive';
+    txt.textContent = age.toFixed(1) + '秒前';
+    txt.style.color = 'var(--c-scene)';
+  } else if (age < 20) {
+    dot.className = 'sc-hb-dot stale';
+    txt.textContent = age.toFixed(0) + '秒前（遅延）';
+    txt.style.color = 'var(--c-warn)';
+  } else {
+    dot.className = 'sc-hb-dot dead';
+    txt.textContent = scHbLastTs > 0 ? Math.round(age) + '秒前' : '未受信';
+    txt.style.color = '#f87171';
+  }
+}
+setInterval(tickHeartbeatDisplay, 500);
+
+// ── OSC LOG ──────────────────────────────────────────────────────────
+function addOscLogEntry(msg) {
+  _oscMsgThisSec++;
+  if (currentMode !== 'studio') return;
+  const body = document.getElementById('osc-log-body');
+  if (!body) return;
+  const d   = new Date();
+  const hms = d.toTimeString().slice(0, 8);
+  const ms  = String(d.getMilliseconds()).padStart(3, '0');
+  const argsStr = Array.isArray(msg.args)
+    ? msg.args.map(a => typeof a === 'number' ? a.toFixed(3) : String(a)).join(' ')
+    : '';
+  const el = document.createElement('div');
+  el.className = 'osc-log-entry';
+  el.innerHTML =
+    '<span class="osc-ts">' + hms + '.' + ms + '</span>' +
+    '<span class="osc-addr">' + (msg.address || '?') + '</span>' +
+    '<span class="osc-args">' + argsStr + '</span>';
+  body.insertBefore(el, body.firstChild);
+  if (body.children.length > 80) body.removeChild(body.lastChild);
+}
+setInterval(() => {
+  const rateEl = document.getElementById('osc-log-rate');
+  if (rateEl) rateEl.textContent = 'OSC: ' + _oscMsgThisSec + ' msg/s';
+  _oscMsgThisSec = 0;
+}, 1000);
+
+// ── SPARKLINES ───────────────────────────────────────────────────────
+const SPARKLINE_DEFS = [
+  { section:'studio-drone', key:'drone-freq',     label:'freq',       color:'#60a5fa', min:20, max:200 },
+  { section:'studio-drone', key:'drone-feedback', label:'fbk',        color:'#60a5fa', min:0,  max:0.9 },
+  { section:'studio-drone', key:'drone-room',     label:'room',       color:'#60a5fa', min:0,  max:1   },
+  { section:'studio-gran',  key:'gran-density',   label:'gran/dens',  color:'#fb923c', min:1,  max:80  },
+  { section:'studio-gran',  key:'gran-spray',     label:'gran/spray', color:'#fb923c', min:0,  max:1   },
+  { section:'studio-gran',  key:'gsynth-density', label:'gsynth/den', color:'#f97316', min:1,  max:80  },
+  { section:'studio-gran',  key:'gsynth-bright',  label:'gsynth/brg', color:'#f97316', min:0,  max:1   },
+  { section:'studio-gran',  key:'gsynth-chaos',   label:'gsynth/chs', color:'#f97316', min:0,  max:1   },
+  { section:'studio-gsamp', key:'gsamp-density',  label:'density',    color:'#2dd4bf', min:1,  max:80  },
+  { section:'studio-gsamp', key:'gsamp-spray',    label:'spray',      color:'#2dd4bf', min:0,  max:1   },
+  { section:'studio-gsamp', key:'gsamp-pos',      label:'pos',        color:'#2dd4bf', min:0,  max:1   },
+];
+
+function initSparklines() {
+  SPARKLINE_DEFS.forEach(def => {
+    sparkBuffers[def.key] = { vals: new Array(SPARK_SAMPLES).fill(null), head: 0 };
+    const section = document.getElementById(def.section);
+    if (!section) return;
+    const row = document.createElement('div');
+    row.className = 'spark-row';
+    const lbl = document.createElement('span');
+    lbl.className = 'spark-label';
+    lbl.textContent = def.label;
+    const cv = document.createElement('canvas');
+    cv.id = 'sp-' + def.key;
+    cv.setAttribute('width', '160');
+    cv.setAttribute('height', '20');
+    cv.className = 'sparkline';
+    const val = document.createElement('span');
+    val.id = 'sp-v-' + def.key;
+    val.className = 'spark-val';
+    val.textContent = '—';
+    row.appendChild(lbl);
+    row.appendChild(cv);
+    row.appendChild(val);
+    section.appendChild(row);
+  });
+}
+
+function studioTrackParam(key, value, min, max, fmt) {
+  if (value == null) return;
+  const buf = sparkBuffers[key];
+  if (!buf) return;
+  const norm = Math.max(0, Math.min(1, (value - min) / (max - min)));
+  buf.vals[buf.head] = norm;
+  buf.head = (buf.head + 1) % SPARK_SAMPLES;
+  const spv = document.getElementById('sp-v-' + key);
+  if (spv) spv.textContent = fmt(value);
+}
+
+function drawSparkline(def) {
+  if (currentMode !== 'studio') return;
+  const canvas = document.getElementById('sp-' + def.key);
+  if (!canvas) return;
+  const buf = sparkBuffers[def.key];
+  if (!buf) return;
+  const W = canvas.width, H = canvas.height;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0d0d12';
+  ctx.fillRect(0, 0, W, H);
+  const vals = [];
+  for (let i = 0; i < SPARK_SAMPLES; i++) {
+    vals.push(buf.vals[(buf.head + i) % SPARK_SAMPLES]);
+  }
+  ctx.beginPath();
+  ctx.strokeStyle = def.color;
+  ctx.lineWidth = 1.5;
+  let started = false;
+  for (let i = 0; i < vals.length; i++) {
+    if (vals[i] == null) continue;
+    const x = (i / (SPARK_SAMPLES - 1)) * (W - 2) + 1;
+    const y = H - 2 - vals[i] * (H - 4);
+    if (!started) { ctx.moveTo(x, y); started = true; }
+    else { ctx.lineTo(x, y); }
+  }
+  if (started) ctx.stroke();
+}
+
+function drawAllSparklines() {
+  SPARKLINE_DEFS.forEach(def => drawSparkline(def));
+}
+
+function updateStudioMarkov(state) {
+  if (!state || !state.state) return;
+  const el = document.getElementById('studio-markov-state');
+  if (el) el.textContent = state.state;
+}
+
 // ── INIT ──────────────────────────────────────────────────
+initSparklines();
 connect();
 </script>
 </body>
