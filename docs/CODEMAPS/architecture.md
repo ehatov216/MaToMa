@@ -1,4 +1,4 @@
-<!-- Generated: 2026-04-04 (updated) | Files scanned: 48 | Token estimate: ~700 -->
+<!-- Generated: 2026-04-05 (updated) | ThreeLayerController移行・SonicAnatomyBridge追加 -->
 # Architecture Overview
 
 ## System Diagram
@@ -31,34 +31,36 @@
 ```
 Human (Browser) → WS → bridge.py → OSC → SC → Audio
                               ↓
-                    MarkovTimescale  (上位: 30s〜5min)
-                        ↓ 引力点設定
-                    ChaosEngine      (中位+下位: ms〜2拍)
-                        ├── _middle_model (BoundedWalk/Fractal/LSystem/Blend)
-                        └── _lower_model  (Dejavu/BoundedWalk/LSystem/Blend)
+                    ThreeLayerController（3層統合制御）
+                        ├── UpperLayer   (Markov状態機械, 60秒ごと)
+                        │     → STATE_ZONES/STATE_CONTROLS から UpperControl 生成
+                        │     → Tidalプリセット自動切換え
+                        ├── _middle_next (BoundedWalk, 0.1秒ごと)
+                        └── _lower_next  (Dejavu, 0.1秒ごと) → OSC送信
                     TuringSequencer  (Turingステップ)
                     TidalController  (パターン生成)
+                    SonicAnatomyBridge (SA DB → Tidalシード生成)
 ```
 
 ## 3層タイムスケールアーキテクチャ
 
 ```
-MarkovTimescale（上位, 30s〜5min）
-  状態: void / sparse / medium / dense / intense
+UpperLayer（上位, 60秒 Markov）
+  状態: void / sparse / medium / dense / intense（5状態）
   制御: Markov 70% + エネルギーフィードバック 30%
-        ↓ 引力点 + speed/dejavu_prob を設定
+        ↓ UpperControl(center, width, speed, snap_prob, micro_range) を生成
         ↓ Tidalプリセット自動切換え（TIDAL_PRESET_BY_STATE）
            void→minimal_klank, sparse→opn_sparse, medium→alva_euclidean,
            dense→alva_phase, intense→chaos_collapse
 ─────────────────────────────────────────────
-ChaosEngine._middle_model（中位, 2s〜16拍）
-  選択: BoundedWalk / Fractal / LSystem / DynamicBlendMiddle
-  人間制御: REPEAT↔CHAOS スライダー（0=LSystem, 1=BoundedWalk）
+_middle_next（中位, 0.1秒更新）
+  アルゴリズム: BoundedWalk（固定実装）
+  動作: Upper の center に引き寄せられながら width 内をドリフト
 ─────────────────────────────────────────────
-ChaosEngine._lower_model（下位, 0.1s〜2拍）
-  選択: Dejavu / BoundedWalk / LSystem / DynamicBlendLower
-  人間制御: REPEAT↔CHAOS スライダー（0=Dejavu, 1=BoundedWalk）
-  Markov制御: dejavu_prob（set_snap_prob経由で委譲）
+_lower_next（下位, 0.1秒更新）
+  アルゴリズム: Dejavu（固定実装）
+  動作: middle ± micro_range で微変動、snap_prob で過去値へスナップバック
+  → OSC送信: _send_osc(osc_address, [param, new_current])
 ```
 
 ## Startup Flow
@@ -75,8 +77,8 @@ start.sh
 ## 4-Layer Musical Time Control (SPEC.md)
 
 ```
-Song Form  (数分)        ← MarkovTimescale (void→intense遷移)
-Section    (8-32小節)    ← 人間がプリセットシーン選択
-Phrase     (1-4小節)     ← ChaosEngine (中位モデル)
-Parameter  (ms-秒)      ← ChaosEngine (下位モデル) + TuringSequencer
+Song Form  (数分)        ← UpperLayer (void→intense Markov遷移)
+Section    (8-32小節)    ← 人間がプリセットシーン選択 / SonicAnatomyBridge
+Phrase     (1-4小節)     ← _middle_next (BoundedWalk ドリフト)
+Parameter  (ms-秒)      ← _lower_next (Dejavu微変動) + TuringSequencer
 ```

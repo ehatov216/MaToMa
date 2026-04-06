@@ -21,6 +21,67 @@ SCENES_FILE = Path(__file__).parent / "scenes.json"
 _SCENES_CACHE: list[dict] | None = None
 
 
+# ── SCENE DNA プロファイル ─────────────────────────────────────────────────
+#
+# MusicGenerator が参照するシーンごとの音楽的性格定義。
+# ChaosEngine の引力点（attractor）とは独立した、
+# Multi-timescale Algorithm 専用のパラメーターセット。
+#
+# 各フィールドの意味:
+#   scale_change_prob    - 1 tick (~60秒) あたりのスケール転調確率
+#   preferred_modes      - UpperLayer がランダム選択するモードのプール
+#   chord_gravity        - GravityMatrix の重みタイプ ("tonic" | "dominant")
+#   onset_density_target - SAシード未設定時のリズム密度デフォルト値 (0-1)
+#   tidal_slow           - スロー系パッドチャンネル (d5) の slow 乗数
+SCENE_DNA: dict[str, dict] = {
+    "void": {
+        "scale_change_prob":    0.02,
+        "preferred_modes":      ["minor", "dorian"],
+        "chord_gravity":        "tonic",
+        "onset_density_target": 0.2,
+        "tidal_slow":           8,
+        "harmonic_bars":        8,    # 8小節ごとにコード変更（深淵の時間感覚）
+        "arc_speed":            0.01,  # 非常に緩やかな旋律輪郭
+    },
+    "warm": {
+        "scale_change_prob":    0.05,
+        "preferred_modes":      ["major", "dorian"],
+        "chord_gravity":        "tonic",
+        "onset_density_target": 0.4,
+        "tidal_slow":           4,
+        "harmonic_bars":        4,    # 4小節ごと（標準的な和声リズム）
+        "arc_speed":            0.02,
+    },
+    "vast": {
+        "scale_change_prob":    0.03,
+        "preferred_modes":      ["dorian", "phrygian"],
+        "chord_gravity":        "tonic",
+        "onset_density_target": 0.3,
+        "tidal_slow":           12,
+        "harmonic_bars":        16,   # 16小節ごと（最も長い→広大な空間感）
+        "arc_speed":            0.005,  # 極めて緩やか
+    },
+    "lost": {
+        "scale_change_prob":    0.10,
+        "preferred_modes":      ["phrygian", "minor"],
+        "chord_gravity":        "dominant",
+        "onset_density_target": 0.6,
+        "tidal_slow":           2,
+        "harmonic_bars":        2,    # 2小節ごと（不安定・落ち着かない）
+        "arc_speed":            0.04,
+    },
+    "peak": {
+        "scale_change_prob":    0.15,
+        "preferred_modes":      ["minor", "phrygian"],
+        "chord_gravity":        "dominant",
+        "onset_density_target": 0.9,
+        "tidal_slow":           1,
+        "harmonic_bars":        1,    # 1小節ごと（最高密度・最大緊張）
+        "arc_speed":            0.05,
+    },
+}
+
+
 def load_scenes() -> list[dict]:
     """scenes.json からシーン一覧を読み込む（初回のみI/O、以降はキャッシュを返す）。"""
     global _SCENES_CACHE

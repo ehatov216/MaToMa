@@ -23,8 +23,6 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from tidal_patterns import get_preset
-
 logger = logging.getLogger(__name__)
 
 # ── 定数 ─────────────────────────────────────────────────────────────────
@@ -60,6 +58,12 @@ PARAM_SPECS: dict[str, dict[str, tuple]] = {
         "spray":   (0.0,  1.0,  0.30, "/matoma/gran_sampler/param"),
         "room":    (0.0,  1.0,  0.40, "/matoma/gran_sampler/param"),
         "amp":     (0.0,  1.0,  0.50, "/matoma/gran_sampler/param"),
+    },
+    # melody レイヤー: Tidal Control Channel 経由でリズムパターンの音程を制御
+    # osc_address="_tidal_ctrl" は送信先 Tidal ctrl ポート(6010)への振り分けを示すセンチネル
+    # note: MIDI ノート番号 36=C2, 48=C3, 60=C4(中央C), 72=C5
+    "melody": {
+        "note": (36.0, 72.0, 48.0, "_tidal_ctrl"),
     },
 }
 
@@ -98,6 +102,10 @@ STATE_ZONES: dict[str, dict[str, dict[str, dict[str, float]]]] = {
             "room":    {"center": 0.90, "width": 0.06},
             "amp":     {"center": 0.10, "width": 0.04},
         },
+        # void: 低音域でほぼ動かない（C2〜C3付近）
+        "melody": {
+            "note": {"center": 40.0, "width": 4.0},
+        },
     },
     "sparse": {
         "drone": {
@@ -126,6 +134,10 @@ STATE_ZONES: dict[str, dict[str, dict[str, dict[str, float]]]] = {
             "spray":   {"center": 0.20, "width": 0.08},
             "room":    {"center": 0.70, "width": 0.08},
             "amp":     {"center": 0.20, "width": 0.06},
+        },
+        # sparse: 低音〜中低音（C3付近）、やや広め
+        "melody": {
+            "note": {"center": 47.0, "width": 6.0},
         },
     },
     "medium": {
@@ -156,6 +168,10 @@ STATE_ZONES: dict[str, dict[str, dict[str, dict[str, float]]]] = {
             "room":    {"center": 0.50, "width": 0.10},
             "amp":     {"center": 0.50, "width": 0.06},
         },
+        # medium: 中音域（C3〜C4）、程よい揺れ
+        "melody": {
+            "note": {"center": 54.0, "width": 8.0},
+        },
     },
     "dense": {
         "drone": {
@@ -184,6 +200,10 @@ STATE_ZONES: dict[str, dict[str, dict[str, dict[str, float]]]] = {
             "spray":   {"center": 0.50, "width": 0.15},
             "room":    {"center": 0.40, "width": 0.10},
             "amp":     {"center": 0.55, "width": 0.06},
+        },
+        # dense: 中高音域（C4付近）、動きが大きい
+        "melody": {
+            "note": {"center": 60.0, "width": 8.0},
         },
     },
     "intense": {
@@ -214,6 +234,10 @@ STATE_ZONES: dict[str, dict[str, dict[str, dict[str, float]]]] = {
             "room":    {"center": 0.30, "width": 0.08},
             "amp":     {"center": 0.70, "width": 0.06},
         },
+        # intense: 高音域（C4〜C5）、最も広い揺れ幅
+        "melody": {
+            "note": {"center": 65.0, "width": 8.0},
+        },
     },
 }
 
@@ -235,14 +259,6 @@ BASE_MATRIX: dict[str, list[float]] = {
     "medium":  [0.05, 0.20, 0.40, 0.25, 0.10],
     "dense":   [0.02, 0.08, 0.30, 0.40, 0.20],
     "intense": [0.05, 0.10, 0.25, 0.40, 0.20],
-}
-
-TIDAL_PRESET_BY_STATE: dict[str, str] = {
-    "void":    "minimal_klank",
-    "sparse":  "opn_sparse",
-    "medium":  "alva_euclidean",
-    "dense":   "alva_phase",
-    "intense": "chaos_collapse",
 }
 
 _ENERGY_HIGH     = 0.65
@@ -438,7 +454,6 @@ class UpperLayer:
                 self._state = next_state
                 self._state_start = time.time()
                 self._overrides.clear()  # 新状態では手動オーバーライドをリセット
-                self._apply_tidal(next_state)
                 await self._broadcast({"type": "markov_state", "state": self.get_state_info()})
         except asyncio.CancelledError:
             pass
@@ -473,23 +488,6 @@ class UpperLayer:
                 return STATES[i]
         return STATES[current_idx]
 
-    def _apply_tidal(self, state: str) -> None:
-        if self._tidal is None:
-            return
-        preset_name = TIDAL_PRESET_BY_STATE[state]
-        try:
-            codes = get_preset(preset_name)
-            for code in codes:
-                self._tidal.evaluate(code)
-            self._tidal.state["preset"] = preset_name
-            asyncio.create_task(
-                self._broadcast({"type": "tidal_applied", "preset": preset_name})
-            )
-            logger.info("[Upper] tidal preset → %s", preset_name)
-        except Exception as e:
-            logger.warning("[Upper] tidal preset failed: %s", e)
-
-
 # ── ThreeLayerController ──────────────────────────────────────────────────
 
 class ThreeLayerController:
@@ -514,8 +512,10 @@ class ThreeLayerController:
         broadcast: Callable[[dict], Awaitable[None]],
         tidal_controller=None,
         interval: float = 60.0,
+        send_tidal_ctrl: Callable[[str, float], None] | None = None,
     ) -> None:
         self._send_osc = send_osc
+        self._send_tidal_ctrl = send_tidal_ctrl
         self._broadcast = broadcast
         self._running = False
         self._task: asyncio.Task | None = None
@@ -706,7 +706,15 @@ class ThreeLayerController:
                 new_current = _lower_next(new_middle, ctrl, history)
 
                 history.append(new_current)
-                self._send_osc(state.osc_address, [param, new_current])
+                if state.osc_address == "_tidal_ctrl":
+                    # melody レイヤー → Tidal Control Channel (port 6010) へ
+                    # キー名は "layer_param" 形式（例: "melody_note"）
+                    # Tidal 側では cI 0 "melody_note" で参照する
+                    if self._send_tidal_ctrl is not None:
+                        ctrl_key = f"{layer}_{param}"
+                        self._send_tidal_ctrl(ctrl_key, new_current)
+                else:
+                    self._send_osc(state.osc_address, [param, new_current])
 
                 new_layer[param] = state.with_values(new_current, new_middle)
             new_params[layer] = new_layer

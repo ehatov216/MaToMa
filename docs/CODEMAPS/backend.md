@@ -53,6 +53,13 @@
 /matoma/layer/middle/chaos     → controller.set_middle_chaos(ratio) — speed変換
 /matoma/layer/lower/chaos      → controller.set_lower_chaos(ratio)  — dejavu_prob変換
 
+# Sonic Anatomy Bridge
+/matoma/sonic_anatomy/load            → load_record(None) → broadcast("sonic_anatomy_seed")
+/matoma/sonic_anatomy/load/<track_id> → load_record(track_id) → broadcast("sonic_anatomy_seed")
+/matoma/sonic_anatomy/apply           → _apply_seed(seed, rhythm=True, harmony=True)
+/matoma/sonic_anatomy/apply_rhythm    → _apply_seed(seed, rhythm=True, harmony=False)
+/matoma/sonic_anatomy/apply_harmony   → _apply_seed(seed, rhythm=False, harmony=True)
+
 # その他
 /matoma/audio/get_devices      → pyaudio → broadcast(device_list)
 /matoma/audio/set_device       → scsynth再起動
@@ -146,7 +153,15 @@ claude_tidal.py (250行) — Claude API統合
 
 param_mapper.py (129行) — パラメーター正規化・マッピング
 
-turing_gene.py (285行) — 遺伝的アルゴリズムによるパターン進化
+sonic_anatomy_bridge.py (397行) — Sonic Anatomy DB → Tidalシード生成
+  ├── load_record(track_id?) → Optional[SonicAnatomyRecord]
+  │   SQLiteDB (/Sonic Anatomy/projects/sonic_anatomy_catalog.db) から解析データ読み込み
+  ├── generate_tidal_seed(record) → TidalSeed
+  │   BPM/スケール/リズム/コード進行 → Tidalパターンコード（d1〜d6）
+  └── seed_to_dict(seed) → dict (WebSocket送信用JSON)
+
+  ⚠️ 注意: フロントエンドUIが未実装（load/applyボタン・WS受信ハンドラーなし）
+  ⚠️ 注意: randomize_models.py（BoundedWalk/DejavuModel）は未使用・dead code
 
 musical_control.py — MusicalControl（Tidalとの統合制御）
 ```

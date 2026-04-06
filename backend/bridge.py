@@ -31,6 +31,7 @@ from pythonosc.udp_client import SimpleUDPClient
 
 from autonomous import AutonomousMode
 from musical_control import MusicalControl
+from sonic_anatomy_bridge import load_record, generate_tidal_seed, seed_to_dict
 from three_layer_controller import ThreeLayerController
 from param_mapper import (
     chaos_to_internal,
@@ -38,7 +39,8 @@ from param_mapper import (
     tension_to_internal,
     trig_prob_from_density,
 )
-from scenes import get_scene, scene_to_osc_messages
+from scenes import get_scene, scene_to_osc_messages, SCENE_DNA
+from music_generator import MusicGenerator
 from sequencer import TuringSequencer
 from tidal_controller import TidalController
 from tidal_patterns import get_preset, PRESETS
@@ -152,6 +154,7 @@ OSC_LISTEN_HOST = "127.0.0.1"
 OSC_LISTEN_PORT = 9000   # SCからPythonへ（このポートで待ち受ける）
 SC_HOST = "127.0.0.1"
 SC_PORT = 57200  # PythonからSCへ（MaToMa専用ポート）
+TIDAL_CTRL_PORT = 6010   # Tidal Control Channel（melody_note等を /ctrl で送る）
 WS_HOST = "localhost"
 WS_PORT = 8765   # ブラウザとのWebSocket
 
@@ -168,6 +171,9 @@ connected_clients: set[websockets.WebSocketServerProtocol] = set()
 # SCへメッセージを送るクライアント
 sc_client = SimpleUDPClient(SC_HOST, SC_PORT)
 
+# Tidal Control Channel クライアント（melody_note 等を /ctrl で送る）
+tidal_ctrl_client = SimpleUDPClient(SC_HOST, TIDAL_CTRL_PORT)
+
 # 自律モード（broadcast は後で関数参照として渡す）
 autonomous: Optional[AutonomousMode] = None
 
@@ -182,6 +188,9 @@ sequencer: Optional[TuringSequencer] = None
 
 # Musical Control（キー・スケール・コード進行の制御）
 musical: Optional[MusicalControl] = None
+
+# Multi-timescale Algorithm 音楽生成エンジン
+music_gen: Optional[MusicGenerator] = None
 
 # SC プロセス
 sc_process = None
@@ -200,6 +209,15 @@ def _send_osc(address: str, args: list) -> None:
     送信内容は WebSocket 経由でブラウザの Studio Mode に表示される。
     """
     sc_client.send_message(address, args)
+
+
+def _send_tidal_ctrl(key: str, value: float) -> None:
+    """Tidal Control Channel (port 6010) へ /ctrl OSC を送信する。
+
+    Tidal 側で cI 0 "melody_note" のように参照できる。
+    ThreeLayerController の melody レイヤーから呼ばれる。
+    """
+    tidal_ctrl_client.send_message("/ctrl", [key, float(value)])
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(broadcast({
@@ -385,6 +403,9 @@ def _handle_osc_message(address: str, *args) -> None:
         if musical is not None:
             musical.start()
             log.info("MusicalControl 自動スタート")
+        if music_gen is not None:
+            music_gen.start()
+            log.info("MusicGenerator 自動スタート")
         asyncio.get_running_loop().create_task(
             broadcast({"type": "sc_ready", "message": "SC起動完了"})
         )
@@ -505,6 +526,8 @@ async def ws_handler(websocket) -> None:
                         # コントローラーの引力点をシーンに合わせて更新する
                         if controller is not None:
                             controller.set_scene(scene)
+                        if music_gen is not None and scene_name in SCENE_DNA:
+                            music_gen.set_scene(SCENE_DNA[scene_name])
                         await broadcast({"type": "scene_changed", "scene": scene})
                         log.info(f"シーン切り替え: {scene_name}")
                     else:
@@ -694,6 +717,9 @@ async def ws_handler(websocket) -> None:
                     })
                     asyncio.create_task(start_sc())
 
+                elif address.startswith("/matoma/sonic_anatomy/"):
+                    await _handle_sonic_anatomy(address, args, websocket)
+
                 elif address.startswith("/matoma/tidal/"):
                     await _handle_tidal(address, args, websocket)
 
@@ -753,6 +779,95 @@ async def ws_handler(websocket) -> None:
     finally:
         connected_clients.discard(websocket)
         log.info(f"ブラウザ切断  残={len(connected_clients)}")
+
+
+# Sonic Anatomy の状態（最後に生成したシードを保持）
+_sonic_anatomy_state: dict = {}
+
+
+async def _handle_sonic_anatomy(address: str, args: list, websocket) -> None:
+    """Sonic Anatomy ブリッジ関連の WebSocket メッセージを処理する。
+
+    /matoma/sonic_anatomy/load          : ランダムにレコードを読んでシードを生成
+    /matoma/sonic_anatomy/load/<track_id> : 指定 track_id のシードを生成
+    /matoma/sonic_anatomy/apply         : 最後に生成したシードを Tidal に適用
+    /matoma/sonic_anatomy/apply_rhythm  : リズムラインのみ適用
+    /matoma/sonic_anatomy/apply_harmony : ハーモニーラインのみ適用
+    """
+    sub = address[len("/matoma/sonic_anatomy/"):]
+
+    if sub.startswith("load"):
+        # パス残り部分が track_id になる（例: load/250a26eaf38e84db）
+        track_id = sub[len("load/"):].strip() if "/" in sub else None
+        record = await asyncio.get_running_loop().run_in_executor(
+            None, load_record, track_id or None
+        )
+        if record is None:
+            await websocket.send(json.dumps({
+                "type": "sonic_anatomy_error",
+                "message": "レコードが見つかりませんでした",
+            }))
+            return
+
+        seed = generate_tidal_seed(record)
+        # グローバルに保持（apply コマンドで使う）
+        _sonic_anatomy_state["last_seed"] = seed
+        payload = seed_to_dict(seed)
+        log.info(
+            f"SA シード生成: track={record.track_id} bpm={record.bpm:.1f}"
+            f" density={record.onset_density:.2f} key={record.key_root}{record.key_mode}"
+        )
+        await broadcast(payload)
+
+    elif sub == "apply":
+        seed = _sonic_anatomy_state.get("last_seed")
+        if seed is None:
+            await websocket.send(json.dumps({
+                "type": "sonic_anatomy_error",
+                "message": "先に load してください",
+            }))
+            return
+        await _apply_seed(seed, rhythm=True, harmony=True)
+
+    elif sub == "apply_rhythm":
+        seed = _sonic_anatomy_state.get("last_seed")
+        if seed is not None:
+            await _apply_seed(seed, rhythm=True, harmony=False)
+
+    elif sub == "apply_harmony":
+        seed = _sonic_anatomy_state.get("last_seed")
+        if seed is not None:
+            await _apply_seed(seed, rhythm=False, harmony=True)
+
+
+async def _apply_seed(seed, *, rhythm: bool, harmony: bool) -> None:
+    """TidalSeed を実際に tidal.evaluate() / set_tempo() で適用する。"""
+    if tidal is None:
+        log.warning("TidalController 未初期化 — SA シードを適用できません")
+        return
+
+    # MusicGenerator にも SA シードを渡す（スケール・音程・密度の初期化）
+    if music_gen is not None:
+        music_gen.set_seed(seed)
+
+    tidal.set_tempo(seed.bpm)
+    lines = []
+    if rhythm:
+        lines.extend(seed.rhythm_lines)
+    if harmony:
+        lines.extend(seed.harmony_lines)
+
+    mode = "all" if rhythm and harmony else "rhythm" if rhythm else "harmony"
+    code = "\n".join(lines)
+    tidal.evaluate(code)
+    log.info(f"SA シード適用: mode={mode} {len(lines)} ライン")
+    await broadcast({
+        "type": "sonic_anatomy_applied",
+        "mode": mode,
+        "bpm": seed.bpm,
+        "code": code,
+    })
+
 
 
 async def _handle_tidal(address: str, args: list, websocket) -> None:
@@ -1091,16 +1206,19 @@ def _release_pid_lock() -> None:
 
 async def main() -> None:
     """OSCサーバーとWebSocketサーバーを同時に起動する。"""
-    global autonomous, controller, tidal, sequencer, musical
+    global autonomous, controller, tidal, sequencer, musical, music_gen
 
     _acquire_pid_lock()
     await asyncio.sleep(0.8)  # 旧プロセスの終了を待つ（イベントループをブロックしない）
 
     autonomous = AutonomousMode(sc_client.send_message, broadcast)
     tidal = TidalController()
+    music_gen = MusicGenerator(tidal)
     autonomous.set_tidal(tidal)
     sequencer = TuringSequencer(sc_client.send_message, broadcast)
-    controller = ThreeLayerController(_send_osc, broadcast, tidal_controller=tidal)
+    controller = ThreeLayerController(
+        _send_osc, broadcast, tidal_controller=tidal, send_tidal_ctrl=_send_tidal_ctrl
+    )
     musical = MusicalControl(tidal, broadcast, lambda: controller._upper._state)
 
     disp = Dispatcher()
