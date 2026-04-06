@@ -12,6 +12,7 @@
   --c-rhythmic:#f43f5e;--c-auto:#a78bfa;--c-warn:#fbbf24;
   --c-energy:#fbbf24;
   --c-glitch:#ff4466;--c-tidal:#2dd4bf;
+  --c-sa:#e879f9;
 }
 body{background:var(--bg);color:var(--text);
   font-family:'SF Mono','Fira Code',monospace;font-size:12px;min-height:100vh}
@@ -185,6 +186,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
 .tidal-preset-btn:hover{background:var(--bg3);color:var(--text)}
 .tidal-preset-btn.on{border-color:var(--c-tidal);color:var(--c-tidal);background:#051a18;
   box-shadow:0 0 8px rgba(45,212,191,.12)}
+
+/* ── SONIC ANATOMY ── */
+.sa-apply-btn{width:100%;padding:.3rem .4rem;font-family:inherit;font-size:.62rem;
+  border-radius:3px;border:1px solid var(--border);background:transparent;
+  color:var(--dim);cursor:pointer;transition:all .12s;text-align:left;letter-spacing:.04em}
+.sa-apply-btn:hover{background:var(--bg3);color:var(--text)}
+.sa-apply-btn.flash{border-color:var(--c-sa);color:var(--c-sa);background:#1a0a1f;
+  box-shadow:0 0 8px rgba(232,121,249,.15)}
+.sa-apply-btn:disabled{opacity:.35;cursor:default}
 
 /* ── TIMESCALE ── */
 .radio-group{display:flex;flex-direction:column;gap:.18rem;margin-top:.2rem}
@@ -1021,6 +1031,31 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
       </div>
     </div>
 
+    <!-- SONIC ANATOMY -->
+    <div class="mod" id="sa-panel">
+      <div class="mhdr">
+        <div class="mbar" style="background:var(--c-sa)"></div>
+        <div class="mname">SONIC ANATOMY</div>
+        <span id="sa-status" style="font-size:.57rem;color:var(--dim);margin-left:.3rem">未ロード</span>
+      </div>
+      <div class="mbody">
+        <div style="display:flex;gap:4px;margin-bottom:.5rem">
+          <button class="tidal-ss-btn" onclick="saLoad()">LOAD</button>
+        </div>
+        <div style="font-size:.57rem;color:var(--dim);margin-bottom:.4rem;line-height:1.6">
+          <div>track: <span id="sa-track-id" style="color:var(--text)">—</span></div>
+          <div>bpm: <span id="sa-bpm" style="color:var(--c-sa)">—</span></div>
+          <div style="margin-top:.1rem;font-size:.55rem">notes: <span id="sa-notes" style="color:var(--text)">—</span></div>
+        </div>
+        <div class="msub">APPLY</div>
+        <div style="display:flex;flex-direction:column;gap:.22rem">
+          <button class="sa-apply-btn" onclick="saApplyAll()"     id="sa-btn-all"     disabled>APPLY ALL</button>
+          <button class="sa-apply-btn" onclick="saApplyRhythm()"  id="sa-btn-rhythm"  disabled>APPLY RHYTHM</button>
+          <button class="sa-apply-btn" onclick="saApplyHarmony()" id="sa-btn-harmony" disabled>APPLY HARMONY</button>
+        </div>
+      </div>
+    </div>
+
   </div><!-- #right-col2 -->
 
   <!-- LOG (span all columns) -->
@@ -1154,6 +1189,22 @@ function handleMessage(m) {
   else if (t === 'tidal_applied')  { tidalPresetApplied(m.preset); addLog('/tidal', 'applied: ' + (m.preset || '')); }
   else if (t === 'tidal_state')    { if (m.state) { setTidalRunning(!!m.state.running); if (m.state.preset) tidalPresetApplied(m.state.preset); } }
   else if (t === 'markov_state')   { updateMarkovState(m.state || {}); }
+  else if (t === 'sonic_anatomy_seed') {
+    updateSonicAnatomyUI(m);
+    addLog('/sonic_anatomy', 'loaded: ' + (m.track_id || '?') + ' bpm=' + (m.bpm || '?'));
+  }
+  else if (t === 'sonic_anatomy_applied') {
+    addLog('/sonic_anatomy', 'applied: ' + (m.mode || 'all'));
+    const flashId = m.mode === 'rhythm' ? 'sa-btn-rhythm'
+                  : m.mode === 'harmony' ? 'sa-btn-harmony' : 'sa-btn-all';
+    const btn = document.getElementById(flashId);
+    if (btn) { btn.classList.add('flash'); setTimeout(() => btn.classList.remove('flash'), 1200); }
+  }
+  else if (t === 'sonic_anatomy_error') {
+    const st = document.getElementById('sa-status');
+    if (st) { st.textContent = 'エラー'; st.style.color = '#f87171'; }
+    addLog('/sonic_anatomy/err', m.message || 'error');
+  }
   else if (t === 'osc_sent')       { addOscLogEntry(m); }
   else if (t === 'sc_heartbeat')   { scHbLastTs = m.ts || (Date.now() / 1000); }
   else { addLog(t || m.address || '?', JSON.stringify(m.args || m.params || {})); }
@@ -1648,6 +1699,50 @@ document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.key >= '1' && e.key <= '4') selectScene(SCENES[parseInt(e.key) - 1]);
 });
+
+// ── SONIC ANATOMY ──────────────────────────────────────
+let _saCurrentSeed = null;
+
+function saLoad() {
+  send({ address: '/matoma/sonic_anatomy/load', args: [] });
+  addLog('/sonic_anatomy', 'load random...');
+  const st = document.getElementById('sa-status');
+  if (st) { st.textContent = 'ロード中...'; st.style.color = 'var(--dim)'; }
+}
+
+function saApplyAll() {
+  if (!_saCurrentSeed) return;
+  send({ address: '/matoma/sonic_anatomy/apply', args: [] });
+  addLog('/sonic_anatomy', 'apply all');
+}
+
+function saApplyRhythm() {
+  if (!_saCurrentSeed) return;
+  send({ address: '/matoma/sonic_anatomy/apply_rhythm', args: [] });
+  addLog('/sonic_anatomy', 'apply rhythm');
+}
+
+function saApplyHarmony() {
+  if (!_saCurrentSeed) return;
+  send({ address: '/matoma/sonic_anatomy/apply_harmony', args: [] });
+  addLog('/sonic_anatomy', 'apply harmony');
+}
+
+function updateSonicAnatomyUI(seed) {
+  _saCurrentSeed = seed;
+  const st = document.getElementById('sa-status');
+  if (st) { st.textContent = 'ロード済'; st.style.color = 'var(--c-sa)'; }
+  const trackEl = document.getElementById('sa-track-id');
+  if (trackEl) trackEl.textContent = seed.track_id || '—';
+  const bpmEl = document.getElementById('sa-bpm');
+  if (bpmEl) bpmEl.textContent = seed.bpm ? seed.bpm.toFixed(1) : '—';
+  const notesEl = document.getElementById('sa-notes');
+  if (notesEl) notesEl.textContent = seed.notes || '—';
+  ['sa-btn-all', 'sa-btn-rhythm', 'sa-btn-harmony'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = false;
+  });
+}
 
 // ── GLITCH SYNTH ──────────────────────────────────────
 const activeGlitchSynths = new Set();

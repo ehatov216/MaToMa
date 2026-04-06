@@ -196,6 +196,35 @@ def _pitch_affinity(root: str, mode: str, pcd: list[float]) -> float:
     return sum(pcd[pc] for pc in scale_pcs if pc < len(pcd))
 
 
+def _compute_sa_activity_multiplier(
+    onset_density: float, sa_seq: list[str]
+) -> float:
+    """SAデータの活動量から3層メロディ制御の緩和倍率を計算する。
+
+    ドローン的なSA（onset_density低・コード多様性低）ほど大きな値を返し、
+    MiddleLayer / UpperLayer / arc_speed の動きを比例的に抑制する。
+
+    Returns:
+        1.0: 通常（活動的なSA）
+        最大 8.0: ドローン的なSA（コード変更をほぼ停止）
+    """
+    # onset_density: 0.0 → 4.0、0.3 → 1.0、0.4+ → 1.0
+    density_factor = max(1.0, 4.0 - onset_density * 10.0)
+
+    # コード多様性: ユニーク度数の種類数
+    unique_degrees = len(set(sa_seq)) if sa_seq else 0
+    if unique_degrees == 0:
+        chord_factor = 4.0   # コード進行なし → 最大抑制
+    elif unique_degrees == 1:
+        chord_factor = 2.0   # 1種類のみ → 半分の速度
+    elif unique_degrees == 2:
+        chord_factor = 1.5   # 2種類 → やや抑制
+    else:
+        chord_factor = 1.0   # 3種類以上 → 通常
+
+    return min(8.0, max(density_factor, chord_factor))
+
+
 # ── データクラス ────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -340,6 +369,8 @@ class MusicGenerator:
         # SA由来のコード進行シーケンス（MiddleLayerの引力点）
         self._sa_chord_sequence: list[str] = []
         self._sa_chord_idx: int = 0
+        # SAデータの活動量に基づく3層制御の緩和倍率（1.0=通常、最大8.0=ドローン）
+        self._sa_activity_multiplier: float = 1.0
 
     # ── 公開API ─────────────────────────────────────────────────────────────
 
@@ -377,12 +408,16 @@ class MusicGenerator:
             repeats = max(1, round(chord.get("duration_beats", 4) / 4))
             sa_seq.extend([roman] * repeats)
 
+        multiplier = _compute_sa_activity_multiplier(
+            record.onset_density, sa_seq
+        )
         with self._lock:
             self._seed = record
             self._pad_dirty = True
             self._bpm = max(40.0, record.bpm)  # 下限40BPMでガード
             self._sa_chord_sequence = sa_seq
             self._sa_chord_idx = 0
+            self._sa_activity_multiplier = multiplier
 
         mode = (
             record.key_mode if record.key_mode in SCALE_INTERVALS else "minor"
@@ -393,7 +428,8 @@ class MusicGenerator:
             f"SA シード設定: bpm={record.bpm:.1f} "
             f"key={record.key_root}/{record.key_mode} "
             f"onset={record.onset_density:.2f} "
-            f"chord_seq={sa_seq}"
+            f"chord_seq={sa_seq} "
+            f"activity_multiplier={multiplier:.2f}"
         )
 
     def set_scene(self, dna: dict) -> None:
@@ -424,11 +460,13 @@ class MusicGenerator:
         with self._lock:
             dna = self._scene_dna
             seed = self._seed
+            sa_multiplier = self._sa_activity_multiplier
 
         if not dna:
             return
 
-        prob = dna.get("scale_change_prob", 0.02)
+        # SA活動量が低い（ドローン的）ほど確率を下げる
+        prob = dna.get("scale_change_prob", 0.02) / sa_multiplier
         if random.random() < prob:
             modes = dna.get("preferred_modes", ["minor"])
             new_mode = random.choice(modes)
@@ -691,19 +729,23 @@ class MusicGenerator:
 
             # MiddleLayer: BPM連動の和声リズムでコード度数を変える
             # 1小節 = (60秒/BPM) × 4拍、harmonic_bars 小節ごとに変更
+            # SA活動量が低い（ドローン的）ほど sa_activity_multiplier が大きくなり
+            # コード変更間隔がさらに長くなる
             with self._lock:
                 bpm = self._bpm
                 harmonic_bars = self._harmonic_bars
+                sa_multiplier = self._sa_activity_multiplier
             bar_secs = (60.0 / bpm) * 4
-            chord_interval = bar_secs * harmonic_bars
+            chord_interval = bar_secs * harmonic_bars * sa_multiplier
             self._secs_since_chord_change += tick_interval
             if self._secs_since_chord_change >= chord_interval:
                 self._secs_since_chord_change = 0.0
                 self._middle_layer_tick()
 
             # メロディアーク更新（フレーズ輪郭の三角波）
+            # SA活動量が低いほど arc_speed を下げ、オクターブシフトも緩やかにする
             with self._lock:
-                arc_speed = self._arc_speed
+                arc_speed = self._arc_speed / sa_multiplier
             new_arc = self._arc_phase + self._arc_direction * arc_speed
             self._arc_phase = max(0.0, min(1.0, new_arc))
             if self._arc_phase >= 1.0:

@@ -195,14 +195,14 @@ SynthDef(\matoma_perc_hihat, {
 }).add;
 
 // ──────────────────────────────────────────────────────────────────
-// 3. matoma_perc_clap — 純粋サイン波バースト（池田亮司的ピュアトーン）
+// 3. matoma_perc_clap — Klank非整数倍音クラップ（Alva Noto × 池田亮治）
 //
-//    美学参照: artist_ikeda_aesthetics.md → サイン波 = デジタル・アルファベットの核
-//    「サイン波・クリック・ノイズ」3要素のうち Track 0/1/2 でクリック・ノイズを担当。
-//    Track 3 は「純粋サイン波」 — データソニフィケーション的な倍音列から1音を選ぶ。
-//    周波数: [55, 110, 220, 440, 880, 1760, 3520, 8800] の中からランダム選択。
-//    → 「ポン」または「ピン」と純音が立ち上がって消える。
-//    持続時間もランダム（10-100ms）。完全ドライ。
+//    美学参照: artist_alvanoto_aesthetics.md / artist_ikeda_aesthetics.md
+//    → Klank（非整数倍音比 1.0/1.73/2.93/4.17/6.31）+ Impulse励振
+//    → freqscale: ExpRand(500, 2500) で発音ごとに基音がランダム変化
+//    → 非整数倍音 = 整数倍音（倍音列）を外れた「金属的・電子的共鳴感」
+//    → クリックが共鳴構造に当たって短く消える = "digital materiality"
+//    サンプルから変えた点: sa_clap（WhiteNoiseバースト式）→ Klank非整数倍音＋Impulse励振
 // ──────────────────────────────────────────────────────────────────
 SynthDef(\matoma_perc_clap, {
     arg cutoff  = 4000,   // 後方互換（未使用）
@@ -212,15 +212,20 @@ SynthDef(\matoma_perc_clap, {
         reverse = 0,
         out     = 0;
 
-    var freq, sig, actualDur, env_fwd, env_rev, env;
+    var exciter, sig, actualDur, env_fwd, env_rev, env;
 
-    // 池田亮司的倍音列（2の冪乗 = データソニフィケーション的な純音列）
-    // IRand で発音ごとに1音をランダム選択
-    freq = Select.kr(IRand(0, 7), [55, 110, 220, 440, 880, 1760, 3520, 8800]);
-    sig  = SinOsc.ar(freq);
+    // Impulse励振 → Klank非整数倍音共鳴（発音ごとに基音が変化）
+    exciter = Impulse.ar(0);
+    sig = Klank.ar(
+        `[[1.0, 1.73, 2.93, 4.17, 6.31],     // 非整数倍音比（金属的・電子的共鳴）
+          [1.0,  0.8,  0.6,  0.4,  0.25],    // 各倍音の振幅
+          [0.08, 0.05, 0.03, 0.02, 0.01]],   // 各倍音の減衰時間（秒）
+        exciter,
+        freqscale: ExpRand(500, 2500)         // 発音ごとにランダムな基音
+    );
 
-    // 持続時間（10-100ms でランダム）
-    actualDur = ExpRand(0.01, 0.1);
+    // 持続時間（30-100ms でランダム）
+    actualDur = ExpRand(0.03, 0.10);
 
     env_fwd = EnvGen.ar(Env([1, 0.0001], [actualDur], \exp), doneAction: 2);
     env_rev = EnvGen.ar(Env([0.0001, 1, 0.0001], [actualDur * 0.8, 0.001], [\lin, \exp]), doneAction: 2);

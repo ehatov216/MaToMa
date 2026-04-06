@@ -1324,7 +1324,7 @@ s.waitForBoot({
 
     OSCdef(\matoma_glitch_chaos_param, { |msg|
         var param = msg[1].asSymbol; var value = msg[2].asFloat;
-        var allowed = #[\rate, \fmDepth, \amp];
+        var allowed = #[\rate, \fmDepth, \pitch, \filterQ, \amp];
         { if (allowed.includes(param) && ~currentGlitchChaos.notNil) {
             ~currentGlitchChaos.set(param, value); }; }.defer;
     }, '/matoma/glitch/chaos/param', nil, 57200);
@@ -1342,7 +1342,7 @@ s.waitForBoot({
 
     OSCdef(\matoma_glitch_burst_param, { |msg|
         var param = msg[1].asSymbol; var value = msg[2].asFloat;
-        var allowed = #[\density, \freq, \decay, \amp];
+        var allowed = #[\density, \freq, \decay, \spread, \amp];
         { if (allowed.includes(param) && ~currentGlitchBurst.notNil) {
             ~currentGlitchBurst.set(param, value); }; }.defer;
     }, '/matoma/glitch/burst/param', nil, 57200);

@@ -41,7 +41,9 @@ let matomaShape = OSC "/matoma/rhythmic/trigger" $ ArgList [("s", Nothing), ("fr
 default (Rational, Integer, Double, Pattern String)
 
 -- Tidal を MaToMa ターゲットで起動
-tidalInst <- mkTidalWith [(matomaTarget, [matomaShape])] defaultConfig
+-- cCtrlListen = True : Python から /ctrl OSC を受け取り cF/cI で参照できるようにする
+-- cCtrlPort = 6010   : Tidal Control Channel のポート（SC の 57200 とは別）
+tidalInst <- mkTidalWith [(matomaTarget, [matomaShape])] (defaultConfig { cCtrlListen = True, cCtrlPort = 6010 })
 
 instance Tidally where tidal = tidalInst
 
