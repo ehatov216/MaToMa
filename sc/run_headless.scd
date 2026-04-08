@@ -601,6 +601,137 @@ s.waitForBoot({
 
     ~currentSpectral = nil;
 
+    // ══════════════════════════════════════════════════════════════
+    // ■ PAD SYNTH — サブトラクティブ・パッドシンセ
+    //
+    //   鋸波×3（デチューン）+ パルス → レゾナントLPF + LFOモジュレーション
+    //   → FreeVerb2 → Env.adsr
+    //
+    //   chaos状態による変化が聴き取りやすい設計:
+    //     void  : 低カットオフ・ほぼ静止 → 暗く重いパッド
+    //     sparse: 少し開いたフィルター → 輪郭が出る
+    //     medium: フィルターがLFOで揺れ始める → アナログ感
+    //     dense : 高カットオフ + 強いレゾナンス → 明るく張り詰めた感
+    //     intense: フィルター全開 + 高LFO + 強デチューン → 荒々しい
+    //
+    //   パラメーター:
+    //     cutoff    : LPFカットオフ周波数（Hz）
+    //     reson     : レゾナンス（0=なし、1=強い）
+    //     detune    : デチューン量（0=ユニゾン、1=最大）
+    //     lfo_rate  : LFOレート（0=遅い、1=速い）
+    //     lfo_depth : LFOがカットオフを揺らす深さ
+    //     room      : リバーブ量
+    //     amp       : 音量
+    // ══════════════════════════════════════════════════════════════
+    SynthDef(\matoma_pad_synth, {
+        arg freq      = 110,
+            cutoff    = 600,
+            reson     = 0.25,
+            detune    = 0.15,
+            lfo_rate  = 0.25,
+            lfo_depth = 0.30,
+            room      = 0.60,
+            amp       = 0.30,
+            gate      = 1;
+
+        var lfo, lfo_cut;
+        var osc1L, osc1R, osc2L, osc2R, osc3L, osc3R, osc4L, osc4R;
+        var mix, filt, sig, env, wet;
+        var detune_hz, rq;
+
+        // LFO: カットオフを有機的に揺らす
+        lfo     = LFTri.kr(lfo_rate.linexp(0, 1, 0.03, 8.0)
+                  * LFNoise2.kr(0.08).range(0.85, 1.15))
+                  * lfo_depth;
+        lfo_cut = (cutoff * (1.0 + lfo)).clip(60, 16000);
+
+        // detune_hz: 0〜1 → 周波数に対する比率（0〜3%）
+        detune_hz = detune * 0.03;
+
+        // 4声デチューン（Saw×3 + Pulse）: L/R 独立でステレオ感
+        osc1L = Saw.ar(freq * (1.0 - detune_hz
+                  + LFNoise2.kr(0.04, detune_hz * 0.3)));
+        osc1R = Saw.ar(freq * (1.0 + detune_hz
+                  + LFNoise2.kr(0.06, detune_hz * 0.3)));
+        osc2L = Saw.ar(freq * (1.0 - detune_hz * 1.7
+                  + LFNoise2.kr(0.05, detune_hz * 0.2)));
+        osc2R = Saw.ar(freq * (1.0 + detune_hz * 1.7
+                  + LFNoise2.kr(0.07, detune_hz * 0.2)));
+        osc3L = Pulse.ar(freq * (1.0 - detune_hz * 0.8),
+                  0.5 + LFNoise1.kr(0.15).range(-0.08, 0.08));
+        osc3R = Pulse.ar(freq * (1.0 + detune_hz * 0.8),
+                  0.5 + LFNoise1.kr(0.20).range(-0.08, 0.08));
+        // サブオシレーター（1オクターブ下）: 低音の重さ
+        osc4L = Saw.ar(freq * 0.5 * (1 - detune_hz * 0.5)) * 0.5;
+        osc4R = Saw.ar(freq * 0.5 * (1 + detune_hz * 0.5)) * 0.5;
+
+        mix = [
+            osc1L + osc2L + osc3L + osc4L,
+            osc1R + osc2R + osc3R + osc4R
+        ] * 0.18;
+
+        // レゾナントLPF: reson 0→1 = rq 1.0→0.05（共鳴が強くなる）
+        rq   = reson.linlin(0, 1, 1.0, 0.04).clip(0.04, 1.0);
+        filt = RLPF.ar(mix, lfo_cut, rq);
+        filt = LeakDC.ar(filt.softclip);
+
+        env = EnvGen.ar(Env.adsr(1.8, 0.3, 0.82, 5.0), gate, doneAction: 2);
+        wet = FreeVerb2.ar(filt[0], filt[1],
+            mix:  room.linlin(0, 1, 0.3, 0.82),
+            room: room.linlin(0, 1, 0.5, 0.92),
+            damp: 0.45
+        );
+
+        Out.ar(0, Limiter.ar(wet * env * amp, 0.88));
+    }).add;
+
+    s.sync;
+    "SynthDef定義完了: \\matoma_pad_synth (サブトラクティブパッド)".postln;
+
+    ~currentPadSynth = nil;
+
+    OSCdef(\matoma_pad_synth_start, { |msg|
+        {
+            if (~currentPadSynth.notNil) { ~currentPadSynth.set(\gate, 0); };
+            ~currentPadSynth = Synth(\matoma_pad_synth, addAction: \addToTail);
+            "パッドシンセ開始 (cutoff:600 reson:0.25 detune:0.15)".postln;
+        }.defer;
+    }, '/matoma/pad_synth/start', nil, 57200);
+
+    OSCdef(\matoma_pad_synth_stop, { |msg|
+        {
+            if (~currentPadSynth.notNil) {
+                ~currentPadSynth.set(\gate, 0);
+                ~currentPadSynth = nil;
+                "パッドシンセ停止（5秒フェードアウト）".postln;
+            };
+        }.defer;
+    }, '/matoma/pad_synth/stop', nil, 57200);
+
+    OSCdef(\matoma_pad_synth_param, { |msg|
+        var param = msg[1].asSymbol;
+        var value = msg[2].asFloat;
+        var allowed = #[\freq, \freq_norm, \cutoff, \reson, \detune,
+                        \lfo_rate, \lfo_depth, \room, \amp, \gate];
+        {
+            if (allowed.includes(param).not) {
+                "pad_synth/param: 許可されていないパラメーター '%' を無視".format(param).postln;
+            } {
+                if (~currentPadSynth.notNil) {
+                    if (param == \freq_norm) {
+                        // 0〜1 → 55〜880 Hz（A1〜A5）に対数マップ
+                        ~currentPadSynth.set(\freq, value.linexp(0.0, 1.0, 55.0, 880.0));
+                    } {
+                        ~currentPadSynth.set(param, value);
+                    };
+                    "パッドシンセ param: % = %".format(param, value.round(0.001)).postln;
+                };
+            };
+        }.defer;
+    }, '/matoma/pad_synth/param', nil, 57200);
+
+    "パッドシンセ ロード完了".postln;
+
     OSCdef(\matoma_spectral_start, { |msg|
         {
             if (~currentSpectral.notNil) { ~currentSpectral.set(\gate, 0); };
@@ -1404,6 +1535,7 @@ s.waitForBoot({
             ~currentGranular = nil;
             ~currentGranSynth = nil;
             ~currentGranSampler = nil;
+            ~currentPadSynth = nil;
             ~currentGlitchGendy = nil;
             ~currentGlitchChaos = nil;
             ~currentGlitchBurst = nil;
@@ -1423,6 +1555,7 @@ s.waitForBoot({
             ~currentGranular = nil;
             ~currentGranSynth = nil;
             ~currentGranSampler = nil;
+            ~currentPadSynth = nil;
             ~turingRoutine !? { ~turingRoutine.stop; ~turingRoutine = nil; };
             ~percRoutine   !? { ~percRoutine.stop;  ~percRoutine  = nil; };
             "【再セットアップ】リセット中...".postln;
@@ -1461,7 +1594,9 @@ s.waitForBoot({
     "                    /matoma/drone/all/stop".postln;
     "  Glitch Synths  : /matoma/glitch/[gendy|chaos|burst]/start|stop|param".postln;
     "  Gran Synth     : /matoma/gran_synth/start|stop|param".postln;
-    "    param        : freq, density, grainDur, spread, panSpread, bright, chaos, room, amp".postln;
+    "    param        : freq, freq_norm, density, grainDur, spread, panSpread, bright, harm, chaos, room, amp".postln;
+    "  Pad Synth      : /matoma/pad_synth/start|stop|param".postln;
+    "    param        : freq, freq_norm, cutoff, reson, detune, lfo_rate, lfo_depth, room, amp".postln;
     "  Gran Sampler   : /matoma/gran_sampler/load|start|stop|param|unload".postln;
     "    param        : density, pos, posScatter, rate, grainSize, spray, room, amp".postln;
     "    gendy param  : chaos, pitch, density, amp".postln;
