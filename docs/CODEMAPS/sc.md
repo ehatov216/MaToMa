@@ -1,20 +1,24 @@
-<!-- Generated: 2026-04-04 (updated) | Files scanned: sc/*.scd (10ファイル) | Token estimate: ~900 -->
+<!-- Generated: 2026-04-06 (updated) | Files scanned: sc/*.scd (14ファイル) | drone_generators/gran_sampler/ikeda_engine/glitch追加 -->
 # SuperCollider Architecture
 
 ## ファイル構成
 
 ```
 sc/
-├── run_headless.scd  (1459行) — 起動スクリプト・全モジュールロード・OSCdef登録
-├── drone.scd          (219行) — ドローン SynthDef v3 (自己組織化フィードバック)
-├── granular.scd       (241行) — グラニュラーサンプラー Ndef (バッファベース)
-├── gran_synth.scd     (203行) — グラニュラーシンセ SynthDef (バッファ不要・独立型) NEW
-├── synth.scd           (97行) — FMシンセ SynthDef
-├── ambient.scd        (135行) — アンビエントパッド Ndef
-├── effects.scd        (366行) — スペクトル処理 + グローバルエフェクトチェーン
-├── rhythmic.scd       (438行) — Turing Machineシーケンサー
-├── percussion.scd     (764行) — ドラム SynthDef 群 + 22個の OSCdef
-└── test_sender.scd     (50行) — OSCテスト送信ユーティリティ
+├── run_headless.scd     (1516行) — 起動スクリプト・全モジュールロード・OSCdef登録
+├── drone.scd             (260行) — ドローン SynthDef v3 (自己組織化フィードバック)
+├── drone_generators.scd  (649行) — 5種類ドローンジェネレーター (fm/noise/wavetable/feedback/sines)
+├── granular.scd          (270行) — グラニュラーサンプラー Ndef (バッファベース)
+├── gran_synth.scd        (204行) — グラニュラーシンセ SynthDef (バッファ不要・GrainSin)
+├── gran_sampler.scd      (247行) — グラニュラーサンプラー SynthDef (GrainBuf・ファイル読込)
+├── ikeda_engine.scd      (451行) — 池田亮司的テストパターンエンジン (6レーン・ビット列)
+├── glitch.scd            (154行) — グリッチシンセ 3種 (gendy/chaos/burst)
+├── synth.scd              (97行) — FMシンセ SynthDef
+├── ambient.scd           (135行) — アンビエントパッド Ndef
+├── effects.scd           (530行) — スペクトル処理 + グローバルエフェクトチェーン
+├── rhythmic.scd          (308行) — リズム系 SynthDef 群 (Tidalからトリガー)
+├── percussion.scd        (430行) — ドラム SynthDef 群 + OSCdef
+└── test_sender.scd        (50行) — OSCテスト送信ユーティリティ
 ```
 
 ## 起動シーケンス (run_headless.scd)
@@ -203,6 +207,88 @@ OSCdef:
     rhythmicレイヤーはTidalプリセットとChaosEngineに統合済み。
 ```
 
+## drone_generators.scd — 5種類ドローンジェネレーター
+
+```
+SynthDef:
+  \matoma_drone_fm        — FM + グリッサンド（a_loss_of_self由来）
+  \matoma_drone_noise     — 多声バンドパスノイズ（DroneCollider由来）
+  \matoma_drone_wavetable — ウェーブテーブル + デグレード（SCgazer由来）
+  \matoma_drone_feedback  — フィードバックネットワーク（rumush由来）
+  \matoma_drone_sines     — 揺れる SinOsc 雲（Meandering Sines由来）
+
+共通パラメーター: freq_norm (0-1 → 20-300Hz), room (0-1), amp (0-1), gate
+
+OSCアドレス (port 57200):
+  /matoma/drone/<type>/start   — 開始 (type: fm/noise/wavetable/feedback/sines)
+  /matoma/drone/<type>/stop    — 停止（8〜10秒フェードアウト）
+  /matoma/drone/<type>/param   — パラメーター更新 [名前] [値]
+  /matoma/drone/all/stop       — 全ドローン停止
+```
+
+## gran_sampler.scd — グラニュラーサンプラー（ファイル読込型）
+
+```
+設計: GrainBuf でバッファを粒状分解。OPN的テクスチャ変換が目的。
+ロード手順: browse → load [path] → SC が /loaded を返す → start
+
+パラメーター:
+  density (5-60), pos (0-1), posScatter (0-0.3)
+  rate (0.25-4.0), grainSize (0.05-0.5)
+  spray (0=Impulse/1=Dust), room (0-1), amp (0-1)
+
+OSC (Python → SC, port 57200):
+  /matoma/gran_sampler/load  [path]        → Buffer.readChannel（1ch強制）
+  /matoma/gran_sampler/start               → バッファ確認後 Synth 起動
+  /matoma/gran_sampler/stop                → フェードアウト
+  /matoma/gran_sampler/param [名前] [値]   → パラメーター更新
+  /matoma/gran_sampler/unload              → バッファ解放
+
+OSC (SC → Python, port 9000):
+  /matoma/gran_sampler/loaded    [path, numFrames, sampleRate]
+  /matoma/gran_sampler/load_error [path]
+  /matoma/gran_sampler/no_buffer
+```
+
+## ikeda_engine.scd — 池田亮司的テストパターンエンジン
+
+```
+設計: 0/1ビット列 × 6レーン × 複数グリッド分割。
+     32ステップ完了ごとにランダムビットフリップで状態遷移。
+     「整然としているが決して繰り返さない」デジタルパターン。
+
+6レーン:
+  0: sub    (32分グリッド) — 超低域サイン波 (20-80Hz)
+  1: click  (32分グリッド) — Impulse 単発クリック
+  2: sine   (16分グリッド) — 高域サイン波 (2の冪乗倍音列)
+  3: noise  (32分グリッド) — ビットクラッシュノイズ
+  4: poly5  (5連符)        — サブバス 5連符（BPMと位相ずれ）
+  5: poly7  (7連符)        — クリック 7連符（BPMと位相ずれ）
+
+SynthDef: \ikeda_sub / \ikeda_click / \ikeda_sine / \ikeda_noise
+
+OSCアドレス (port 57200):
+  /matoma/ikeda/start               — エンジン開始
+  /matoma/ikeda/stop                — エンジン停止
+  /matoma/ikeda/bpm [val]           — BPM (30-240)
+  /matoma/ikeda/mutate [val]        — 毎周回のフリップ数 (0-8)
+  /matoma/ikeda/density [lane][val] — レーン密度再生成 (0-1)
+  /matoma/ikeda/layer [n][val]      — レーン ON/OFF (0-5)
+  /matoma/ikeda/amp [val]           — 全体音量 (0-1)
+```
+
+## glitch.scd — グリッチシンセ 3種
+
+```
+設計: エフェクトではなくシンセ（ゼロから音を生成）。Kim Casconeポスト・デジタル美学。
+
+SynthDef:
+  \matoma_glitch_gendy  — Gendy1/3 確率合成（デジタルの叫び・不安定発振）
+    params: chaos(0-1), pitch(0-1), density(0-1), amp(0-1)
+  \matoma_glitch_chaos  — LFDNoise + Hasher カオステクスチャ
+  \matoma_glitch_burst  — Dust + Ringz バースト粒子
+```
+
 ## percussion.scd — ドラムシンセ群
 
 ```
@@ -212,7 +298,7 @@ SynthDef:
   \matoma_perc_hihat  — ハイハット
   \matoma_perc_clap   — クラップ
   (その他パーカッション要素)
-22個のOSCdefで各素子を個別制御
+OSCdefで各素子を個別制御
 ```
 
 ## OSCdef 一覧 (Python → SC)
@@ -222,10 +308,14 @@ SynthDef:
 \matoma_drone            /matoma/drone/param          [key, val] → SynthDef(\matoma_drone).set()
 \matoma_granular         /matoma/granular/param       [key, val] → Ndef(\granular).set(key, val)
 \matoma_gran_load        /matoma/granular/load        [path]     → Buffer.read(path)
-\matoma_gran_synth_start /matoma/gran_synth/start     —          → SynthDef インスタンス起動 NEW
-\matoma_gran_synth_stop  /matoma/gran_synth/stop      —          → gate=0 フェードアウト NEW
-\matoma_gran_synth_param /matoma/gran_synth/param     [key, val] → パラメーター変更 NEW
+\matoma_gran_synth_start /matoma/gran_synth/start     —          → SynthDef インスタンス起動
+\matoma_gran_synth_stop  /matoma/gran_synth/stop      —          → gate=0 フェードアウト
+\matoma_gran_synth_param /matoma/gran_synth/param     [key, val] → パラメーター変更
 \matoma_spectral         /matoma/spectral/param       [key, val] → Ndef(\spectral).set(key, val)
 \matoma_scene            /matoma/scene                [name]     → シーン別パラメーター一括設定
-(+ percussion.scd 内 22個のOSCdef)
+(+ drone_generators.scd 内 15個のOSCdef)
+(+ gran_sampler.scd 内 5個のOSCdef)
+(+ ikeda_engine.scd 内 7個のOSCdef)
+(+ glitch.scd 内 3種×複数のOSCdef)
+(+ percussion.scd 内 OSCdef群)
 ```

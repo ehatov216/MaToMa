@@ -2,2003 +2,865 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MaToMa</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#070709;--bg2:#0d0d12;--bg3:#121218;--border:#1c1c26;
-  --text:#b8b8cc;--dim:#44445a;--bright:#e0e0f0;
-  --c-scene:#4ade80;--c-drone:#60a5fa;--c-gran:#fb923c;
-  --c-rhythmic:#f43f5e;--c-auto:#a78bfa;--c-warn:#fbbf24;
-  --c-energy:#fbbf24;
-  --c-glitch:#ff4466;--c-tidal:#2dd4bf;
-  --c-sa:#e879f9;
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0a0a0a;
+  --bg2: #111;
+  --bg3: #1a1a1a;
+  --border: #2a2a2a;
+  --accent: #4ade80;
+  --accent2: #22c55e;
+  --dim: #555;
+  --text: #ccc;
+  --text2: #888;
+  --danger: #f87171;
+  --warn: #facc15;
+  --node-w: 140px;
 }
-body{background:var(--bg);color:var(--text);
-  font-family:'SF Mono','Fira Code',monospace;font-size:12px;min-height:100vh}
 
-/* ── HEADER ── */
-#hdr{position:sticky;top:0;z-index:200;background:var(--bg2);
-  border-bottom:1px solid var(--border);padding:.4rem .7rem;
-  display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
-#title{font-size:1rem;font-weight:bold;color:#fff;letter-spacing:.2em}
-.dot{width:7px;height:7px;border-radius:50%;background:#222;flex-shrink:0}
-.dot.on  {background:var(--c-scene);box-shadow:0 0 5px var(--c-scene)}
-.dot.warn{background:var(--c-warn);box-shadow:0 0 5px var(--c-warn)}
-.dot.err {background:#f87171;box-shadow:0 0 5px #f87171}
-#sc-label{font-size:.67rem;color:var(--dim)}
-select#device-select{background:var(--bg3);border:1px solid var(--border);
-  color:var(--text);font-family:inherit;font-size:.65rem;
-  padding:.22rem .4rem;border-radius:3px;cursor:pointer;
-  max-width:170px;min-height:24px}
-.hbtn{padding:.28rem .7rem;font-family:inherit;font-size:.68rem;
-  letter-spacing:.06em;border-radius:3px;border:1px solid;
-  background:transparent;cursor:pointer;min-height:26px;transition:opacity .15s}
-.hbtn:hover{opacity:.75}
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'SF Mono', 'Fira Mono', monospace;
+  font-size: 12px;
+}
 
-/* ── LAYOUT ── */
-#console{padding:.5rem;display:grid;
-  grid-template-columns:200px 1fr 220px 220px;gap:.5rem;align-items:start}
-#left-col{display:flex;flex-direction:column;gap:.5rem}
-#mid-col {display:flex;flex-direction:column;gap:.5rem}
-#right-col{display:flex;flex-direction:column;gap:.5rem}
+/* ── Header ─────────────────────────────────── */
+#header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  height: 40px;
+}
+#header h1 {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: var(--accent);
+}
+.status-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--dim);
+  margin-right: 5px;
+  vertical-align: middle;
+  transition: background 0.3s;
+}
+.status-dot.ok { background: var(--accent); }
+.status-dot.warn { background: var(--warn); }
+.status-dot.err { background: var(--danger); }
 
-/* ── MODULE ── */
-.mod{background:var(--bg2);border:1px solid var(--border);border-radius:4px;overflow:hidden}
-.mhdr{display:flex;align-items:center;gap:.4rem;padding:.3rem .55rem;
-  border-bottom:1px solid var(--border)}
-.mbar{width:3px;height:12px;border-radius:2px;flex-shrink:0}
-.mname{font-size:.63rem;font-weight:bold;letter-spacing:.14em;color:var(--bright)}
-.mbody{padding:.5rem .55rem}
-.msub{font-size:.57rem;letter-spacing:.12em;color:var(--dim);
-  margin-bottom:.3rem;margin-top:.15rem}
-.msub:first-child{margin-top:0}
+/* ── Tabs ───────────────────────────────────── */
+#tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+.tab-btn {
+  padding: 8px 20px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text2);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  transition: color 0.2s, border-color 0.2s;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
 
-/* ── SCENE BUTTONS ── */
-.scene-list{display:flex;flex-direction:column;gap:.3rem}
-.scbtn{width:100%;padding:.55rem .4rem;font-family:inherit;font-size:.88rem;
-  font-weight:bold;border-radius:3px;border:1px solid var(--border);
-  background:var(--bg3);color:var(--dim);cursor:pointer;
-  text-align:center;transition:all .12s;letter-spacing:.06em}
-.scbtn:hover{background:#1a1a28;color:var(--text)}
-.scbtn.on{border-color:var(--c-scene);color:var(--c-scene);
-  background:#0a1a0e;box-shadow:0 0 8px rgba(74,222,128,.12)}
-.scene-hint{font-size:.57rem;color:var(--dim);text-align:center;
-  margin-top:.25rem;line-height:1.4}
+/* ── Views ──────────────────────────────────── */
+.view { display: none; }
+.view.active { display: flex; flex-direction: column; height: calc(100vh - 81px); }
 
-/* ── SLIDER ROW ── */
-.sr{display:grid;grid-template-columns:64px 1fr 40px;
-  align-items:center;gap:.3rem;margin-bottom:.34rem}
-.sr:last-child{margin-bottom:0}
-.sl{font-size:.62rem;color:var(--dim)}
-.sl b{display:block;font-weight:normal;color:var(--text);font-size:.63rem}
-.sv{font-size:.6rem;color:var(--c-warn);text-align:right;
-  white-space:nowrap;font-variant-numeric:tabular-nums}
-input[type=range]{width:100%;height:2px;cursor:pointer;
-  -webkit-appearance:none;appearance:none;
-  background:var(--border);border-radius:2px;outline:none}
-input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
-  width:10px;height:10px;border-radius:50%;
-  background:var(--thumb,#60a5fa);cursor:pointer}
+/* ── Signal Flow View ───────────────────────── */
+#flow-nodes {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px 12px;
+  gap: 0;
+  flex-shrink: 0;
+  overflow-x: auto;
+}
 
-/* ── TOGGLE BUTTON ── */
-.tog-row{display:flex;align-items:center;gap:.5rem;margin-bottom:.34rem}
-.tog-label{font-size:.62rem;color:var(--dim);min-width:64px}
-.tog{padding:.3rem .7rem;font-family:inherit;font-size:.65rem;
-  border-radius:3px;border:1px solid var(--border);background:transparent;
-  color:var(--dim);cursor:pointer;transition:all .12s;letter-spacing:.06em}
-.tog:hover{background:var(--bg3);color:var(--text)}
-.tog.on{border-color:var(--c-warn);color:var(--c-warn);background:#1a150a}
+.node-card {
+  width: var(--node-w);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 10px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  text-align: center;
+  flex-shrink: 0;
+}
+.node-card:hover { border-color: var(--dim); }
+.node-card.selected {
+  border-color: var(--accent);
+  background: #0d1f14;
+}
+.node-label {
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: var(--text2);
+  margin-bottom: 6px;
+}
+.node-primary {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.1;
+  min-height: 24px;
+}
+.node-secondary {
+  font-size: 10px;
+  color: var(--text2);
+  margin-top: 4px;
+  min-height: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.node-badge {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  background: var(--bg2);
+  color: var(--dim);
+}
+.node-badge.running { background: #0d1f14; color: var(--accent); }
 
-/* ── CHAOS STATE (read-only) ── */
-.chaos-row{margin-bottom:.3rem}
-.chaos-row:last-child{margin-bottom:0}
-.chaos-hd{display:flex;justify-content:space-between;margin-bottom:.14rem}
-.chaos-key{font-size:.59rem;color:var(--dim)}
-.chaos-val{font-size:.59rem;color:var(--c-warn);
-  font-variant-numeric:tabular-nums}
-.chaos-bar-wrap{position:relative;height:4px;background:var(--bg3);
-  border-radius:2px;border:1px solid var(--border)}
-.chaos-bar{height:100%;border-radius:2px;transition:width .4s ease;position:relative;z-index:2}
-.chaos-bar.drone      {background:var(--c-drone)}
-.chaos-bar.granular   {background:var(--c-gran)}
-.chaos-bar.gran-synth {background:var(--c-gran)}
-.chaos-bar.gran-sampler{background:#2dd4bf}
-.chaos-attractor{position:absolute;top:-1px;width:2px;height:calc(100% + 2px);
-  background:#fff;opacity:.5;border-radius:1px;
-  transition:left .5s ease;z-index:3;pointer-events:none}
-@keyframes chaos-pulse{0%,100%{opacity:.55}50%{opacity:1}}
-.chaos-running .chaos-bar{animation:chaos-pulse 2s ease-in-out infinite}
+.flow-arrow {
+  color: var(--dim);
+  font-size: 18px;
+  padding: 0 6px;
+  user-select: none;
+  flex-shrink: 0;
+}
 
-/* ── DRONE GENERATOR ── */
-.gen-btns{display:grid;grid-template-columns:repeat(3,1fr);gap:.28rem;margin-bottom:.3rem}
-.gen-btns.row2{grid-template-columns:repeat(2,1fr)}
-.genbtn{padding:.38rem .2rem;font-family:inherit;font-size:.65rem;
-  font-weight:bold;border-radius:3px;border:1px solid var(--border);
-  background:var(--bg3);color:var(--dim);cursor:pointer;
-  text-align:center;transition:all .12s;letter-spacing:.04em}
-.genbtn:hover{background:#0d1a28;color:var(--text)}
-.genbtn.on{border-color:var(--c-drone);color:var(--c-drone);
-  background:#080e18;box-shadow:0 0 8px rgba(96,165,250,.15)}
-.genbtn.stop-all{border-color:#f87171;color:#f87171}
-.genbtn.stop-all:hover{background:#1a0808}
+/* ── Detail Panel ───────────────────────────── */
+#detail-panel {
+  flex: 1;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  padding: 20px 24px;
+  background: var(--bg);
+}
+.detail-title {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--text2);
+  margin-bottom: 16px;
+}
+.detail-section { margin-bottom: 20px; }
+.detail-section-label {
+  font-size: 10px;
+  color: var(--dim);
+  letter-spacing: 0.1em;
+  margin-bottom: 8px;
+}
 
-/* ── EFFECT PANEL ── */
-.fx-section{margin-bottom:.4rem}
-.fx-section:last-child{margin-bottom:0}
-.fx-hdr{display:flex;align-items:center;gap:.35rem;margin-bottom:.28rem}
-.fx-name{font-size:.6rem;font-weight:bold;letter-spacing:.1em;color:var(--bright)}
-.fx-togbtn{padding:.2rem .5rem;font-family:inherit;font-size:.6rem;
-  border-radius:3px;border:1px solid var(--border);background:transparent;
-  color:var(--dim);cursor:pointer;transition:all .12s}
-.fx-togbtn:hover{background:var(--bg3);color:var(--text)}
-.fx-togbtn.on{border-color:var(--c-gran);color:var(--c-gran);background:#100e06}
+/* button groups */
+.btn-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.btn {
+  padding: 6px 12px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.btn:hover { border-color: var(--dim); }
+.btn.active {
+  background: var(--accent2);
+  border-color: var(--accent);
+  color: #000;
+  font-weight: 700;
+}
+.btn.danger { border-color: var(--danger); color: var(--danger); }
+.btn.danger:hover { background: #2a1010; }
+.btn.primary { border-color: var(--accent); color: var(--accent); }
+.btn.primary:hover { background: #0d1f14; }
 
+/* sliders */
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+.slider-row label { min-width: 80px; color: var(--text2); font-size: 11px; }
+.slider-row input[type=range] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+.slider-row .val { min-width: 40px; text-align: right; color: var(--text); }
 
-/* ── GLITCH SYNTH ── */
-.glitch-src-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-bottom: 6px; }
-.glitch-src-btn { background: #1a1a1a; border: 1px solid #333; color: #aaa; padding: 5px 2px; font-size: 11px; cursor: pointer; border-radius: 3px; text-align: center; }
-.glitch-src-btn:hover { border-color: var(--c-glitch); }
-.glitch-src-btn.on { background: var(--c-glitch); color: #000; border-color: var(--c-glitch); }
+/* energy bar */
+.energy-bar-wrap {
+  width: 100%;
+  height: 6px;
+  background: var(--bg3);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+.energy-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.5s;
+}
 
-/* ── PERC STEP EDITOR ── */
-#perc-panel .mbody{padding:.4rem .45rem}
-.perc-bpm-row{display:grid;grid-template-columns:54px 1fr 36px;
-  align-items:center;gap:.3rem;margin-bottom:.4rem}
-.perc-tracks{display:flex;flex-direction:column;gap:.3rem}
-.perc-track{display:flex;flex-direction:column;gap:.2rem}
-.perc-track-hdr{display:flex;align-items:center;gap:.3rem}
-.perc-track-name{font-size:.6rem;font-weight:bold;letter-spacing:.1em;
-  color:var(--bright);min-width:38px}
-.perc-track-btns{display:flex;gap:.22rem;margin-left:auto}
-.perc-ctrl-btn{padding:.18rem .42rem;font-family:inherit;font-size:.58rem;
-  border-radius:3px;border:1px solid var(--border);background:transparent;
-  color:var(--dim);cursor:pointer;transition:all .12s;letter-spacing:.04em}
-.perc-ctrl-btn:hover{background:var(--bg3);color:var(--text)}
-.perc-steps{display:grid;grid-template-columns:repeat(16,1fr);gap:2px}
-.step-btn{aspect-ratio:1;border-radius:2px;border:1px solid var(--border);
-  background:var(--bg3);cursor:pointer;transition:all .1s;
-  min-width:0;min-height:0;padding:0}
-.step-btn:hover{background:#1a1a28}
-.step-btn.on.kick  {background:#f43f5e;border-color:#f43f5e;box-shadow:0 0 4px rgba(244,63,94,.4)}
-.step-btn.on.snare {background:#fb923c;border-color:#fb923c;box-shadow:0 0 4px rgba(251,146,60,.4)}
-.step-btn.on.hihat {background:#60a5fa;border-color:#60a5fa;box-shadow:0 0 4px rgba(96,165,250,.4)}
-.step-btn.on.clap  {background:#a78bfa;border-color:#a78bfa;box-shadow:0 0 4px rgba(167,139,250,.4)}
-.perc-start-stop{display:flex;gap:.3rem;margin-bottom:.38rem}
-.perc-ss-btn{flex:1;padding:.32rem .25rem;font-family:inherit;font-size:.65rem;
-  border-radius:3px;border:1px solid var(--border);background:transparent;
-  color:var(--dim);cursor:pointer;transition:all .12s;text-align:center}
-.perc-ss-btn:hover{background:var(--bg3);color:var(--text)}
-.perc-ss-btn.on{border-color:var(--c-rhythmic);color:var(--c-rhythmic);background:#150a0d;
-  box-shadow:0 0 8px rgba(244,63,94,.15)}
+/* tidal lines */
+.tidal-line {
+  padding: 4px 8px;
+  background: var(--bg3);
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--text2);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
-/* ── TIDAL ── */
-.tidal-ss-btn{flex:1;padding:.32rem .25rem;font-family:inherit;font-size:.65rem;
-  border-radius:3px;border:1px solid var(--border);background:transparent;
-  color:var(--dim);cursor:pointer;transition:all .12s;text-align:center}
-.tidal-ss-btn:hover{background:var(--bg3);color:var(--text)}
-.tidal-ss-btn.on{border-color:var(--c-tidal);color:var(--c-tidal);background:#051a18;
-  box-shadow:0 0 8px rgba(45,212,191,.15)}
-.tidal-presets{display:flex;flex-direction:column;gap:.22rem;margin-bottom:.3rem}
-.tidal-preset-btn{width:100%;padding:.3rem .4rem;font-family:inherit;font-size:.62rem;
-  border-radius:3px;border:1px solid var(--border);background:transparent;
-  color:var(--dim);cursor:pointer;transition:all .12s;text-align:left;letter-spacing:.04em}
-.tidal-preset-btn:hover{background:var(--bg3);color:var(--text)}
-.tidal-preset-btn.on{border-color:var(--c-tidal);color:var(--c-tidal);background:#051a18;
-  box-shadow:0 0 8px rgba(45,212,191,.12)}
+/* ── NODE TREE View ─────────────────────────── */
+#view-tree {
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+#tree-status {
+  color: var(--text2);
+  font-size: 11px;
+  margin-bottom: 12px;
+}
+.tree-node {
+  padding: 2px 0;
+}
+.tree-node-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  cursor: default;
+}
+.tree-node-row:hover { background: var(--bg3); }
+.tree-indent { display: inline-block; width: 16px; flex-shrink: 0; }
+.tree-type-group { color: var(--warn); font-size: 10px; }
+.tree-type-synth { color: var(--accent); font-size: 10px; }
+.tree-id { color: var(--dim); font-size: 10px; }
+.tree-def { color: var(--text2); font-size: 10px; }
 
-/* ── SONIC ANATOMY ── */
-.sa-apply-btn{width:100%;padding:.3rem .4rem;font-family:inherit;font-size:.62rem;
-  border-radius:3px;border:1px solid var(--border);background:transparent;
-  color:var(--dim);cursor:pointer;transition:all .12s;text-align:left;letter-spacing:.04em}
-.sa-apply-btn:hover{background:var(--bg3);color:var(--text)}
-.sa-apply-btn.flash{border-color:var(--c-sa);color:var(--c-sa);background:#1a0a1f;
-  box-shadow:0 0 8px rgba(232,121,249,.15)}
-.sa-apply-btn:disabled{opacity:.35;cursor:default}
-
-/* ── TIMESCALE ── */
-.radio-group{display:flex;flex-direction:column;gap:.18rem;margin-top:.2rem}
-.radio-group label{font-size:.62rem;color:var(--dim);display:flex;align-items:center;gap:.3rem;cursor:pointer}
-.radio-group label:hover{color:var(--text)}
-.radio-group input[type=radio]{accent-color:#9b59b6;cursor:pointer}
-
-/* ── LOG ── */
-#log-panel{background:var(--bg2);border:1px solid var(--border);
-  border-radius:4px;overflow:hidden;grid-column:1/-1}
-#log-hdr{display:flex;align-items:center;gap:.4rem;
-  padding:.25rem .55rem;border-bottom:1px solid var(--border);cursor:pointer}
-#log-hdr:hover{background:var(--bg3)}
-#log-body{padding:.35rem .55rem;max-height:72px;overflow-y:auto}
-.le{display:flex;gap:.4rem;margin:.07rem 0;font-size:.59rem}
-.le .lt{color:#2a2a3a;flex-shrink:0}
-.le .la{color:var(--c-drone)}
-.le .lv{color:var(--c-warn)}
-
-/* ── STUDIO MODE ────────────────────────────────────────── */
-.mode-tabs{display:flex;gap:.3rem;margin-left:auto}
-.tab-btn{padding:.28rem .65rem;font-family:inherit;font-size:.68rem;
-  letter-spacing:.06em;border-radius:3px;border:1px solid var(--border);
-  background:transparent;cursor:pointer;color:var(--dim);transition:all .15s}
-.tab-btn:hover{color:var(--text);border-color:var(--text)}
-.tab-btn.active{border-color:var(--c-auto);color:var(--c-auto);background:#13101a}
-#studio-view{padding:.5rem;display:none;flex-direction:column;gap:.5rem}
-.studio-statusbar{background:var(--bg2);border:1px solid var(--border);
-  border-radius:4px;padding:.3rem .7rem;display:flex;align-items:center;gap:1.2rem;flex-wrap:wrap}
-.sc-hb-dot{display:inline-block;width:7px;height:7px;border-radius:50%;
-  background:#222;flex-shrink:0;vertical-align:middle;margin-right:.25rem;transition:background .3s}
-.sc-hb-dot.alive{background:var(--c-scene);box-shadow:0 0 5px var(--c-scene)}
-.sc-hb-dot.stale{background:var(--c-warn);box-shadow:0 0 5px var(--c-warn)}
-.sc-hb-dot.dead {background:#f87171;box-shadow:0 0 5px #f87171}
-.studio-stat-item{font-size:.63rem;color:var(--dim)}
-.studio-signal-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem}
-.studio-section{background:var(--bg2);border:1px solid var(--border);border-radius:4px;overflow:hidden}
-.studio-sec-hdr{padding:.25rem .6rem;border-bottom:1px solid var(--border);
-  font-size:.63rem;font-weight:bold;letter-spacing:.12em;color:var(--bright)}
-.studio-sec-body{padding:.4rem .6rem}
-.spark-row{display:flex;align-items:center;gap:.35rem;margin-bottom:.26rem}
-.spark-row:last-child{margin-bottom:0}
-.spark-label{font-size:.57rem;color:var(--dim);min-width:78px;flex-shrink:0}
-.sparkline{flex:1;height:20px;border-radius:2px;display:block;background:var(--bg3);min-width:80px}
-.spark-val{font-size:.57rem;color:var(--c-warn);min-width:38px;
-  text-align:right;font-variant-numeric:tabular-nums;flex-shrink:0}
-.studio-osc-section{background:var(--bg2);border:1px solid var(--border);border-radius:4px;overflow:hidden}
-.studio-osc-hdr{padding:.25rem .6rem;border-bottom:1px solid var(--border);
-  display:flex;align-items:center;gap:.6rem}
-.studio-osc-hdr-label{font-size:.63rem;font-weight:bold;letter-spacing:.12em;color:var(--bright)}
-#osc-log-body{max-height:160px;overflow-y:auto;padding:.3rem .6rem;display:flex;flex-direction:column}
-.osc-log-entry{display:flex;gap:.5rem;margin:.04rem 0;font-size:.58rem;
-  font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden}
-.osc-ts{color:#2a2a3a;flex-shrink:0}
-.osc-addr{color:var(--c-drone);flex-shrink:0}
-.osc-args{color:var(--c-warn);opacity:.8;overflow:hidden;text-overflow:ellipsis}
+/* ── Utility ────────────────────────────────── */
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+hr.divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 </style>
 </head>
 <body>
 
-<!-- HEADER -->
-<header id="hdr">
-  <div id="title">MaToMa</div>
-  <div class="dot" id="ws-dot" title="WebSocket"></div>
-  <div class="dot" id="sc-dot" title="SuperCollider"></div>
-  <span id="sc-label">SC: ...</span>
-  <span style="color:var(--dim);font-size:.65rem;flex-shrink:0">OUT</span>
-  <select id="device-select" onchange="onDeviceChange(this.value)" title="音声出力デバイス">
-    <option value="">— 読込中 —</option>
-  </select>
-  <button class="hbtn" id="btn-test"
-    style="border-color:#4ade80;color:#4ade80" onclick="testTone()">♪ TEST</button>
-  <button class="hbtn"
-    style="border-color:#f87171;color:#f87171" onclick="stopAll()">■ STOP ALL</button>
-  <button class="hbtn" id="btn-restart"
-    style="border-color:#60a5fa;color:#60a5fa" onclick="restartAll()">↺ RESTART</button>
-  <div class="mode-tabs">
-    <button class="tab-btn active" id="tab-live"   onclick="switchMode('live')">LIVE</button>
-    <button class="tab-btn"        id="tab-studio" onclick="switchMode('studio')">STUDIO</button>
+<!-- ── Header ─────────────────────────────────── -->
+<div id="header">
+  <div class="row">
+    <span class="status-dot" id="dot-ws"></span>
+    <span id="label-ws" style="color:var(--text2)">WS --</span>
+    <span style="color:var(--border)">|</span>
+    <span class="status-dot" id="dot-sc"></span>
+    <span id="label-sc" style="color:var(--text2)">SC --</span>
   </div>
-</header>
-
-<main id="console">
-
-  <!-- LEFT: SCENE -->
-  <div id="left-col">
-
-    <!-- SCENE -->
-    <div class="mod">
-      <div class="mhdr">
-        <div class="mbar" style="background:var(--c-scene)"></div>
-        <div class="mname">SCENE</div>
-      </div>
-      <div class="mbody">
-        <div class="scene-list">
-          <button class="scbtn" id="scb-void" onclick="selectScene('void')">void</button>
-          <button class="scbtn" id="scb-warm" onclick="selectScene('warm')">warm</button>
-          <button class="scbtn" id="scb-vast" onclick="selectScene('vast')">vast</button>
-          <button class="scbtn" id="scb-lost" onclick="selectScene('lost')">lost</button>
-        </div>
-        <div class="scene-hint">1〜4 キーでも切替</div>
-      </div>
-    </div>
-
-    <!-- DRONE GENERATOR -->
-    <div class="mod">
-      <div class="mhdr">
-        <div class="mbar" style="background:var(--c-drone)"></div>
-        <div class="mname">DRONE</div>
-        <span style="font-size:.57rem;color:var(--dim);margin-left:.3rem">GENERATOR</span>
-      </div>
-      <div class="mbody">
-        <div class="msub">SOURCE</div>
-        <div style="margin-bottom:.28rem">
-          <button class="genbtn on" id="drone-btn-klank" onclick="droneToggle('klank')"
-            style="width:100%;padding:.38rem .2rem">KLANK</button>
-        </div>
-        <div class="gen-btns">
-          <button class="genbtn" id="drone-btn-fm"    onclick="droneToggle('fm')">FM</button>
-          <button class="genbtn" id="drone-btn-noise" onclick="droneToggle('noise')">NOISE</button>
-          <button class="genbtn" id="drone-btn-wavetable" onclick="droneToggle('wavetable')">WAVE</button>
-        </div>
-        <div class="gen-btns row2">
-          <button class="genbtn" id="drone-btn-feedback" onclick="droneToggle('feedback')">FB</button>
-          <button class="genbtn" id="drone-btn-sines"    onclick="droneToggle('sines')">SINES</button>
-        </div>
-        <div style="margin-top:.3rem">
-          <button class="genbtn stop-all" style="width:100%;padding:.35rem"
-            onclick="droneAllStop()">■ ALL STOP</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- GLITCH SYNTH -->
-    <div class="mod">
-      <div class="mhdr">
-        <div class="mbar" style="background:var(--c-glitch)"></div>
-        <div class="mname" style="color:var(--c-glitch)">GLITCH SYNTH</div>
-      </div>
-      <div class="mbody">
-        <div class="msub">SOURCE</div>
-        <div class="glitch-src-btns">
-          <button class="glitch-src-btn" id="btn-glitch-gendy" onclick="glitchSynthToggle('gendy')">GENDY</button>
-          <button class="glitch-src-btn" id="btn-glitch-chaos" onclick="glitchSynthToggle('chaos')">CHAOS</button>
-          <button class="glitch-src-btn" id="btn-glitch-burst" onclick="glitchSynthToggle('burst')">BURST</button>
-        </div>
-
-        <!-- GENDY パラメーター -->
-        <div class="msub">GENDY</div>
-        <div class="sr" style="--thumb:var(--c-glitch)">
-          <div class="sl"><b>CHAOS</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.50" id="s-gch"
-            oninput="glitchSynthParam('gendy','chaos',+this.value,'v-gch')">
-          <div class="sv" id="v-gch">0.50</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-glitch)">
-          <div class="sl"><b>PITCH</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.50" id="s-gpt"
-            oninput="glitchSynthParam('gendy','pitch',+this.value,'v-gpt')">
-          <div class="sv" id="v-gpt">0.50</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-glitch)">
-          <div class="sl"><b>DENSITY</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.50" id="s-gdn"
-            oninput="glitchSynthParam('gendy','density',+this.value,'v-gdn')">
-          <div class="sv" id="v-gdn">0.50</div>
-        </div>
-
-        <!-- CHAOS パラメーター -->
-        <div class="msub" style="margin-top:6px">CHAOS</div>
-        <div class="sr" style="--thumb:var(--c-glitch)">
-          <div class="sl"><b>RATE</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.50" id="s-crt"
-            oninput="glitchSynthParam('chaos','rate',+this.value,'v-crt')">
-          <div class="sv" id="v-crt">0.50</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-glitch)">
-          <div class="sl"><b>FM DEPTH</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.50" id="s-cfm"
-            oninput="glitchSynthParam('chaos','fmDepth',+this.value,'v-cfm')">
-          <div class="sv" id="v-cfm">0.50</div>
-        </div>
-
-        <!-- BURST パラメーター -->
-        <div class="msub" style="margin-top:6px">BURST</div>
-        <div class="sr" style="--thumb:var(--c-glitch)">
-          <div class="sl"><b>DENSITY</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.30" id="s-bdn"
-            oninput="glitchSynthParam('burst','density',+this.value,'v-bdn')">
-          <div class="sv" id="v-bdn">0.30</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-glitch)">
-          <div class="sl"><b>FREQ</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.50" id="s-bfq"
-            oninput="glitchSynthParam('burst','freq',+this.value,'v-bfq')">
-          <div class="sv" id="v-bfq">0.50</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-glitch)">
-          <div class="sl"><b>DECAY</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.30" id="s-bdc"
-            oninput="glitchSynthParam('burst','decay',+this.value,'v-bdc')">
-          <div class="sv" id="v-bdc">0.30</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- GRAN SYNTH -->
-    <div class="mod">
-      <div class="mhdr">
-        <div class="mbar" style="background:var(--c-gran)"></div>
-        <div class="mname" style="color:var(--c-gran)">GRAN SYNTH</div>
-      </div>
-      <div class="mbody">
-        <button class="glitch-src-btn" id="btn-gransyn" onclick="granSynthToggle()" style="width:100%;margin-bottom:6px">OFF</button>
-
-        <div class="msub">PITCH</div>
-        <div class="sr" style="--thumb:var(--c-gran)">
-          <div class="sl"><b>FREQ</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.42" id="s-gsf"
-            oninput="granSynthFreq(+this.value)">
-          <div class="sv" id="v-gsf">110 Hz</div>
-        </div>
-
-        <div class="msub">TEXTURE</div>
-        <div class="sr" style="--thumb:var(--c-gran)">
-          <div class="sl"><b>DENSITY</b></div>
-          <input type="range" min="5" max="60" step="1" value="35" id="s-gsd"
-            oninput="granSynthParam('density',+this.value,'v-gsd',Math.round(+this.value)+' g/s')">
-          <div class="sv" id="v-gsd">35 g/s</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-gran)">
-          <div class="sl"><b>GRAIN DUR</b></div>
-          <input type="range" min="0.05" max="0.5" step="0.01" value="0.18" id="s-gsg"
-            oninput="granSynthParam('grainDur',+this.value,'v-gsg',Math.round(+this.value*1000)+'ms')">
-          <div class="sv" id="v-gsg">180ms</div>
-        </div>
-
-        <div class="msub">TIMBRE</div>
-        <div class="sr" style="--thumb:var(--c-gran)">
-          <div class="sl"><b>SPREAD</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.20" id="s-gss"
-            oninput="granSynthParam('spread',+this.value,'v-gss')">
-          <div class="sv" id="v-gss">0.20</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-gran)">
-          <div class="sl"><b>BRIGHT</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.40" id="s-gsb"
-            oninput="granSynthParam('bright',+this.value,'v-gsb')">
-          <div class="sv" id="v-gsb">0.40</div>
-        </div>
-
-        <div class="msub">SPACE</div>
-        <div class="sr" style="--thumb:var(--c-gran)">
-          <div class="sl"><b>CHAOS</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.30" id="s-gsc"
-            oninput="granSynthParam('chaos',+this.value,'v-gsc')">
-          <div class="sv" id="v-gsc">0.30</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-gran)">
-          <div class="sl"><b>ROOM</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.60" id="s-gsr"
-            oninput="granSynthParam('room',+this.value,'v-gsr')">
-          <div class="sv" id="v-gsr">0.60</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-gran)">
-          <div class="sl"><b>AMP</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.40" id="s-gsa"
-            oninput="granSynthParam('amp',+this.value,'v-gsa')">
-          <div class="sv" id="v-gsa">0.40</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- GRAN SAMPLER -->
-    <div class="mod">
-      <div class="mhdr">
-        <div class="mbar" style="background:#2dd4bf"></div>
-        <div class="mname" style="color:#2dd4bf">GRAN SAMPLER</div>
-      </div>
-      <div class="mbody">
-        <!-- ファイル選択 -->
-        <div class="msub">FILE</div>
-        <button class="glitch-src-btn" onclick="granSamplerBrowse()"
-          style="width:100%;margin-bottom:4px">SELECT FILE</button>
-        <div id="v-gsamp-file"
-          style="font-size:.55rem;color:#888;margin-bottom:6px;
-                 overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-          — no file —
-        </div>
-
-        <!-- ON/OFF -->
-        <button class="glitch-src-btn" id="btn-gsampler"
-          onclick="granSamplerToggle()" style="width:100%;margin-bottom:6px">
-          OFF
-        </button>
-
-        <!-- PLAYBACK -->
-        <div class="msub">PLAYBACK</div>
-        <div class="sr" style="--thumb:#2dd4bf">
-          <div class="sl"><b>POSITION</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.50"
-            id="s-gsp" oninput="granSamplerParam('pos',+this.value,'v-gsp')">
-          <div class="sv" id="v-gsp">0.50</div>
-        </div>
-        <div class="sr" style="--thumb:#2dd4bf">
-          <div class="sl"><b>RATE</b></div>
-          <input type="range" min="0.25" max="4.0" step="0.01" value="1.00"
-            id="s-gsr2"
-            oninput="granSamplerParam('rate',+this.value,'v-gsr2')">
-          <div class="sv" id="v-gsr2">1.00</div>
-        </div>
-        <div class="sr" style="--thumb:#2dd4bf">
-          <div class="sl"><b>SCATTER</b></div>
-          <input type="range" min="0" max="0.3" step="0.005" value="0.08"
-            id="s-gsc2"
-            oninput="granSamplerParam('posScatter',+this.value,'v-gsc2')">
-          <div class="sv" id="v-gsc2">0.08</div>
-        </div>
-
-        <!-- TEXTURE -->
-        <div class="msub">TEXTURE</div>
-        <div class="sr" style="--thumb:#2dd4bf">
-          <div class="sl"><b>DENSITY</b></div>
-          <input type="range" min="5" max="60" step="1" value="20"
-            id="s-gsd2" oninput="granSamplerParam('density',+this.value,
-            'v-gsd2',Math.round(+this.value)+' g/s')">
-          <div class="sv" id="v-gsd2">20 g/s</div>
-        </div>
-        <div class="sr" style="--thumb:#2dd4bf">
-          <div class="sl"><b>GRAIN DUR</b></div>
-          <input type="range" min="0.05" max="0.5" step="0.01" value="0.15"
-            id="s-gsg2" oninput="granSamplerParam('grainSize',+this.value,
-            'v-gsg2',Math.round(+this.value*1000)+'ms')">
-          <div class="sv" id="v-gsg2">150ms</div>
-        </div>
-        <div class="sr" style="--thumb:#2dd4bf">
-          <div class="sl"><b>SPRAY</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.30"
-            id="s-gsy"
-            oninput="granSamplerParam('spray',+this.value,'v-gsy')">
-          <div class="sv" id="v-gsy">0.30</div>
-        </div>
-
-        <!-- SPACE -->
-        <div class="msub">SPACE</div>
-        <div class="sr" style="--thumb:#2dd4bf">
-          <div class="sl"><b>ROOM</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.40"
-            id="s-gsrm"
-            oninput="granSamplerParam('room',+this.value,'v-gsrm')">
-          <div class="sv" id="v-gsrm">0.40</div>
-        </div>
-        <div class="sr" style="--thumb:#2dd4bf">
-          <div class="sl"><b>AMP</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.50"
-            id="s-gsam"
-            oninput="granSamplerParam('amp',+this.value,'v-gsam')">
-          <div class="sv" id="v-gsam">0.50</div>
-        </div>
-      </div>
-    </div>
-
-  </div><!-- #left-col -->
-
-  <!-- MID: 3本の笛 + 操作コントロール -->
-  <div id="mid-col">
-
-    <!-- FLUTE: 3本の笛 -->
-    <div class="mod">
-      <div class="mhdr">
-        <div class="mbar" style="background:var(--c-auto)"></div>
-        <div class="mname">FLUTE</div>
-        <span style="font-size:.57rem;color:var(--dim);margin-left:.3rem">3本の笛 — 内部展開</span>
-        <span style="font-size:.55rem;color:var(--c-drone);margin-left:.5rem;opacity:.7">+ KLANKドローン制御</span>
-      </div>
-      <div class="mbody">
-        <div class="msub">CHARACTER</div>
-        <div class="sr" style="--thumb:var(--c-auto)">
-          <div class="sl"><b>CHAOS</b></div>
-          <input type="range" id="s-chaos"
-            min="0" max="1" value="0.3" step="0.01"
-            oninput="fluteSend('chaos',this.value,'v-chaos',v=>v.toFixed(2))">
-          <div class="sv" id="v-chaos">0.30</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-gran)">
-          <div class="sl"><b>DENSITY</b></div>
-          <input type="range" id="s-density"
-            min="0" max="1" value="0.3" step="0.01"
-            oninput="fluteSend('density',this.value,'v-density',v=>v.toFixed(2))">
-          <div class="sv" id="v-density">0.30</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-rhythmic)">
-          <div class="sl"><b>TENSION</b></div>
-          <input type="range" id="s-tension"
-            min="0" max="1" value="0.2" step="0.01"
-            oninput="fluteSend('tension',this.value,'v-tension',v=>v.toFixed(2))">
-          <div class="sv" id="v-tension">0.20</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-drone)">
-          <div class="sl"><b>BRIGHTNESS</b></div>
-          <input type="range" id="s-brightness"
-            min="0" max="1" value="0.65" step="0.01"
-            oninput="fluteSend('brightness',this.value,'v-brightness',v=>v.toFixed(2))">
-          <div class="sv" id="v-brightness">0.65</div>
-        </div>
-
-        <hr style="border:none;border-top:1px solid var(--border);margin:.42rem 0">
-        <div class="msub">DYNAMICS</div>
-        <div class="sr" style="--thumb:var(--c-energy)">
-          <div class="sl"><b>ENERGY</b></div>
-          <input type="range" id="s-energy"
-            min="0" max="1" value="0.5" step="0.01"
-            oninput="energySend(this.value)">
-          <div class="sv" id="v-energy">0.50</div>
-        </div>
-
-        <hr style="border:none;border-top:1px solid var(--border);margin:.42rem 0">
-        <div class="msub">MASTER</div>
-        <div class="sr" style="--thumb:var(--c-drone)">
-          <div class="sl"><b>BPM</b></div>
-          <input type="range" id="s-bpm"
-            min="40" max="180" value="80" step="1"
-            oninput="bpmSend(this.value)">
-          <div class="sv" id="v-bpm">80</div>
-        </div>
-        <div class="tog-row">
-          <span class="tog-label" style="font-size:.62rem;color:var(--dim)">FREEZE</span>
-          <button class="tog" id="btn-freeze" onclick="freezeToggle()">OFF</button>
-          <span style="font-size:.58rem;color:var(--dim);margin-left:.3rem">瞬間を止める</span>
-        </div>
-        <div class="sr" style="--thumb:var(--bright)">
-          <div class="sl"><b>MASTER</b></div>
-          <input type="range" id="s-master"
-            min="0" max="1" value="0.7" step="0.01"
-            oninput="masterSend(this.value)">
-          <div class="sv" id="v-master">0.70</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- EFFECT -->
-    <div class="mod">
-      <div class="mhdr">
-        <div class="mbar" style="background:var(--c-gran)"></div>
-        <div class="mname">EFFECT</div>
-      </div>
-      <div class="mbody">
-
-        <!-- Wavefold (既存) -->
-        <div class="fx-section">
-          <div class="fx-hdr">
-            <div class="fx-name">WAVEFOLD</div>
-          </div>
-          <div class="sr" style="--thumb:var(--c-gran)">
-            <div class="sl"><b>DRIVE</b></div>
-            <input type="range" id="s-drive"
-              min="0" max="1" value="0.2" step="0.01"
-              oninput="driveSend(this.value)">
-            <div class="sv" id="v-drive">0.20</div>
-          </div>
-        </div>
-
-        <hr style="border:none;border-top:1px solid var(--border);margin:.35rem 0">
-
-        <!-- Delay -->
-        <div class="fx-section">
-          <div class="fx-hdr">
-            <div class="fx-name">DELAY</div>
-            <button class="fx-togbtn" id="fx-delay-toggle" onclick="fxToggle('delay')">DELAY</button>
-          </div>
-          <div class="sr" style="--thumb:var(--c-gran)">
-            <div class="sl"><b>TIME</b></div>
-            <input type="range" id="fx-delay-time"
-              min="0" max="1" value="0.35" step="0.01"
-              oninput="fxParam('delay','time',this.value,'fx-v-delay-time',v=>v.toFixed(2))">
-            <div class="sv" id="fx-v-delay-time">0.35</div>
-          </div>
-          <div class="sr" style="--thumb:var(--c-gran)">
-            <div class="sl"><b>FBK</b></div>
-            <input type="range" id="fx-delay-fbk"
-              min="0" max="0.9" value="0.4" step="0.01"
-              oninput="fxParam('delay','feedback',this.value,'fx-v-delay-fbk',v=>v.toFixed(2))">
-            <div class="sv" id="fx-v-delay-fbk">0.40</div>
-          </div>
-          <div class="sr" style="--thumb:var(--c-gran)">
-            <div class="sl"><b>MIX</b></div>
-            <input type="range" id="fx-delay-mix"
-              min="0" max="1" value="0.3" step="0.01"
-              oninput="fxParam('delay','mix',this.value,'fx-v-delay-mix',v=>v.toFixed(2))">
-            <div class="sv" id="fx-v-delay-mix">0.30</div>
-          </div>
-        </div>
-
-        <hr style="border:none;border-top:1px solid var(--border);margin:.35rem 0">
-
-        <!-- Feedback Loop -->
-        <div class="fx-section">
-          <div class="fx-hdr">
-            <div class="fx-name">FEEDBACK</div>
-            <button class="fx-togbtn" id="fx-feedback-toggle" onclick="fxToggle('feedback')">FB LOOP</button>
-          </div>
-          <div class="sr" style="--thumb:var(--c-gran)">
-            <div class="sl"><b>AMOUNT</b></div>
-            <input type="range" id="fx-feedback-amount"
-              min="0" max="0.85" value="0.4" step="0.01"
-              oninput="fxParam('feedback','amount',this.value,'fx-v-fb-amount',v=>v.toFixed(2))">
-            <div class="sv" id="fx-v-fb-amount">0.40</div>
-          </div>
-          <div class="sr" style="--thumb:var(--c-gran)">
-            <div class="sl"><b>MIX</b></div>
-            <input type="range" id="fx-feedback-mix"
-              min="0" max="1" value="0.3" step="0.01"
-              oninput="fxParam('feedback','mix',this.value,'fx-v-fb-mix',v=>v.toFixed(2))">
-            <div class="sv" id="fx-v-fb-mix">0.30</div>
-          </div>
-        </div>
-
-
-      </div>
-    </div>
-
-  </div><!-- #mid-col -->
-
-  <!-- RIGHT: CHAOS STATE 可視化 (read-only) -->
-  <div id="right-col">
-    <div class="mod" id="chaos-panel">
-      <div class="mhdr">
-        <div class="mbar" style="background:var(--c-auto)"></div>
-        <div class="mname">CHAOS STATE</div>
-        <span id="chaos-status" style="font-size:.57rem;color:var(--dim);margin-left:.3rem">待機</span>
-      </div>
-      <div class="mbody" id="chaos-body">
-        <!-- CHAOS ENGINE コントロール -->
-        <div style="display:flex;gap:4px;margin-bottom:6px">
-          <button class="glitch-src-btn" id="btn-chaos-toggle"
-            onclick="chaosToggle()" style="flex:1">START</button>
-        </div>
-        <div class="sr" style="--thumb:var(--c-auto)">
-          <div class="sl"><b>SPEED</b></div>
-          <div style="flex:1;position:relative;height:4px;background:var(--border);border-radius:2px;margin:0 4px">
-            <div id="cb-ch-spd" style="position:absolute;left:0;top:0;height:100%;width:15%;background:var(--c-auto);border-radius:2px;transition:width .6s ease"></div>
-          </div>
-          <div class="sv" id="v-ch-spd">—</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-auto)">
-          <div class="sl"><b>PROB</b></div>
-          <div style="flex:1;position:relative;height:4px;background:var(--border);border-radius:2px;margin:0 4px">
-            <div id="cb-ch-prob" style="position:absolute;left:0;top:0;height:100%;width:30%;background:var(--c-auto);border-radius:2px;transition:width .6s ease"></div>
-          </div>
-          <div class="sv" id="v-ch-prob">—</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-auto)">
-          <div class="sl"><b>REPEAT</b></div>
-          <div style="flex:1;position:relative;height:4px;background:var(--border);border-radius:2px;margin:0 4px">
-            <div id="cb-ch-dej" style="position:absolute;left:0;top:0;height:100%;width:0%;background:var(--c-auto);border-radius:2px;transition:width .6s ease"></div>
-          </div>
-          <div class="sv" id="v-ch-dej">—</div>
-        </div>
-
-        <!-- ドリフトモデル -->
-        <div class="msub" style="margin-top:.5rem">DRIFT MODEL</div>
-        <div style="display:flex;gap:8px">
-          <div style="flex:1">
-            <div style="font-size:.55rem;color:var(--dim);margin-bottom:.15rem">MIDDLE</div>
-            <div class="radio-group" id="middle-model-group">
-              <label><input type="radio" name="middle-model" value="bounded_walk" checked
-                onchange="send({address:'/matoma/layer/middle/model',args:['bounded_walk']})"> BoundedWalk</label>
-              <label><input type="radio" name="middle-model" value="fractal"
-                onchange="send({address:'/matoma/layer/middle/model',args:['fractal']})"> Fractal</label>
-              <label><input type="radio" name="middle-model" value="lsystem"
-                onchange="send({address:'/matoma/layer/middle/model',args:['lsystem']})"> L-System</label>
-              <label><input type="radio" name="middle-model" value="blend"
-                onchange="send({address:'/matoma/layer/middle/model',args:['blend']})"> Blend</label>
-            </div>
-          </div>
-          <div style="flex:1">
-            <div style="font-size:.55rem;color:var(--dim);margin-bottom:.15rem">LOWER</div>
-            <div class="radio-group" id="lower-model-group">
-              <label><input type="radio" name="lower-model" value="dejavu" checked
-                onchange="send({address:'/matoma/layer/lower/model',args:['dejavu']})"> Dejavu</label>
-              <label><input type="radio" name="lower-model" value="bounded_walk"
-                onchange="send({address:'/matoma/layer/lower/model',args:['bounded_walk']})"> BoundedWalk</label>
-              <label><input type="radio" name="lower-model" value="lsystem"
-                onchange="send({address:'/matoma/layer/lower/model',args:['lsystem']})"> L-System</label>
-              <label><input type="radio" name="lower-model" value="blend"
-                onchange="send({address:'/matoma/layer/lower/model',args:['blend']})"> Blend</label>
-            </div>
-          </div>
-        </div>
-
-        <!-- 反復↔カオス スライダー -->
-        <div class="ctrl-row" style="margin-top:.4rem">
-          <label class="ctrl-lbl" style="font-size:.52rem">MIDDLE<br>REPEAT↔CHAOS</label>
-          <input type="range" id="middle-chaos" min="0" max="1" value="0.5" step="0.01"
-            oninput="send({address:'/matoma/layer/middle/chaos',args:[+this.value]});document.getElementById('v-mid-chaos').textContent=parseFloat(this.value).toFixed(2)">
-          <span id="v-mid-chaos" class="ctrl-val">0.50</span>
-        </div>
-        <div class="ctrl-row">
-          <label class="ctrl-lbl" style="font-size:.52rem">LOWER<br>REPEAT↔CHAOS</label>
-          <input type="range" id="lower-chaos" min="0" max="1" value="0.5" step="0.01"
-            oninput="send({address:'/matoma/layer/lower/chaos',args:[+this.value]});document.getElementById('v-low-chaos').textContent=parseFloat(this.value).toFixed(2)">
-          <span id="v-low-chaos" class="ctrl-val">0.50</span>
-        </div>
-
-        <!-- Markov -->
-        <div class="msub" style="margin-top:.5rem">MARKOV</div>
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:.3rem">
-          <button class="tidal-ss-btn" id="btn-markov-toggle" onclick="markovToggle()">▶ MARKOV</button>
-          <span id="markov-status" style="font-size:.57rem;color:var(--dim)">停止</span>
-        </div>
-        <div class="ctrl-row">
-          <label class="ctrl-lbl">INTERVAL</label>
-          <input type="range" id="markov-interval" min="10" max="300" value="60" step="5"
-            oninput="send({address:'/matoma/markov/interval',args:[+this.value]});document.getElementById('markov-interval-val').textContent=this.value+'s'">
-          <span id="markov-interval-val" class="ctrl-val">60s</span>
-        </div>
-        <div style="font-size:.57rem;color:var(--dim);margin-top:.2rem">
-          状態: <span id="markov-current-state" style="color:#9b59b6;font-weight:bold">medium</span>
-          &nbsp;|&nbsp; 次まで: <span id="markov-remaining">—</span>
-        </div>
-
-        <!-- 状態モニター（read-only） -->
-        <div class="msub" style="margin-top:.4rem">DRONE</div>
-        <div class="chaos-row">
-          <div class="chaos-hd">
-            <span class="chaos-key">freq</span>
-            <span class="chaos-val" id="cv-drone-freq">—</span>
-          </div>
-          <div class="chaos-bar-wrap">
-            <div class="chaos-bar drone" id="cb-drone-freq" style="width:0%"></div>
-            <div class="chaos-attractor" id="ca-drone-freq" style="display:none"></div>
-          </div>
-        </div>
-        <div class="chaos-row">
-          <div class="chaos-hd">
-            <span class="chaos-key">feedback</span>
-            <span class="chaos-val" id="cv-drone-feedback">—</span>
-          </div>
-          <div class="chaos-bar-wrap">
-            <div class="chaos-bar drone" id="cb-drone-feedback" style="width:0%"></div>
-            <div class="chaos-attractor" id="ca-drone-feedback" style="display:none"></div>
-          </div>
-        </div>
-        <div class="chaos-row">
-          <div class="chaos-hd">
-            <span class="chaos-key">room</span>
-            <span class="chaos-val" id="cv-drone-room">—</span>
-          </div>
-          <div class="chaos-bar-wrap">
-            <div class="chaos-bar drone" id="cb-drone-room" style="width:0%"></div>
-            <div class="chaos-attractor" id="ca-drone-room" style="display:none"></div>
-          </div>
-        </div>
-
-        <div class="msub" style="margin-top:.4rem">GRANULAR</div>
-        <div class="chaos-row">
-          <div class="chaos-hd">
-            <span class="chaos-key">density</span>
-            <span class="chaos-val" id="cv-gran-density">—</span>
-          </div>
-          <div class="chaos-bar-wrap">
-            <div class="chaos-bar granular" id="cb-gran-density" style="width:0%"></div>
-            <div class="chaos-attractor" id="ca-gran-density" style="display:none"></div>
-          </div>
-        </div>
-        <div class="chaos-row">
-          <div class="chaos-hd">
-            <span class="chaos-key">spray</span>
-            <span class="chaos-val" id="cv-gran-spray">—</span>
-          </div>
-          <div class="chaos-bar-wrap">
-            <div class="chaos-bar granular" id="cb-gran-spray" style="width:0%"></div>
-            <div class="chaos-attractor" id="ca-gran-spray" style="display:none"></div>
-          </div>
-        </div>
-
-        <div class="msub" style="margin-top:.4rem">GRAN SYNTH</div>
-        <div class="chaos-row">
-          <div class="chaos-hd">
-            <span class="chaos-key">density</span>
-            <span class="chaos-val" id="cv-gsynth-density">—</span>
-          </div>
-          <div class="chaos-bar-wrap">
-            <div class="chaos-bar gran-synth" id="cb-gsynth-density" style="width:0%"></div>
-            <div class="chaos-attractor" id="ca-gsynth-density" style="display:none"></div>
-          </div>
-        </div>
-        <div class="chaos-row">
-          <div class="chaos-hd">
-            <span class="chaos-key">bright</span>
-            <span class="chaos-val" id="cv-gsynth-bright">—</span>
-          </div>
-          <div class="chaos-bar-wrap">
-            <div class="chaos-bar gran-synth" id="cb-gsynth-bright" style="width:0%"></div>
-            <div class="chaos-attractor" id="ca-gsynth-bright" style="display:none"></div>
-          </div>
-        </div>
-        <div class="chaos-row">
-          <div class="chaos-hd">
-            <span class="chaos-key">chaos</span>
-            <span class="chaos-val" id="cv-gsynth-chaos">—</span>
-          </div>
-          <div class="chaos-bar-wrap">
-            <div class="chaos-bar gran-synth" id="cb-gsynth-chaos" style="width:0%"></div>
-            <div class="chaos-attractor" id="ca-gsynth-chaos" style="display:none"></div>
-          </div>
-        </div>
-
-        <div class="msub" style="margin-top:.4rem">GRAN SAMPLER</div>
-        <div class="chaos-row">
-          <div class="chaos-hd">
-            <span class="chaos-key">density</span>
-            <span class="chaos-val" id="cv-gsamp-density">—</span>
-          </div>
-          <div class="chaos-bar-wrap">
-            <div class="chaos-bar gran-sampler" id="cb-gsamp-density" style="width:0%"></div>
-            <div class="chaos-attractor" id="ca-gsamp-density" style="display:none"></div>
-          </div>
-        </div>
-        <div class="chaos-row">
-          <div class="chaos-hd">
-            <span class="chaos-key">spray</span>
-            <span class="chaos-val" id="cv-gsamp-spray">—</span>
-          </div>
-          <div class="chaos-bar-wrap">
-            <div class="chaos-bar gran-sampler" id="cb-gsamp-spray" style="width:0%"></div>
-            <div class="chaos-attractor" id="ca-gsamp-spray" style="display:none"></div>
-          </div>
-        </div>
-        <div class="chaos-row">
-          <div class="chaos-hd">
-            <span class="chaos-key">pos</span>
-            <span class="chaos-val" id="cv-gsamp-pos">—</span>
-          </div>
-          <div class="chaos-bar-wrap">
-            <div class="chaos-bar gran-sampler" id="cb-gsamp-pos" style="width:0%"></div>
-            <div class="chaos-attractor" id="ca-gsamp-pos" style="display:none"></div>
-          </div>
-        </div>
-
-      </div>
-    </div>
-  </div><!-- #right-col -->
-
-  <!-- PERC: ステップエディター -->
-  <div id="right-col2" style="display:flex;flex-direction:column;gap:.5rem">
-    <div class="mod" id="perc-panel">
-      <div class="mhdr">
-        <div class="mbar" style="background:var(--c-rhythmic)"></div>
-        <div class="mname">RHYTHM</div>
-        <span id="perc-status" style="font-size:.57rem;color:var(--dim);margin-left:.3rem">停止</span>
-      </div>
-      <div class="mbody">
-
-        <!-- CHAOS ENGINE START/STOP -->
-        <!-- percussion.scd は CHAOS ENGINE（ポアソン過程）のみで駆動 -->
-        <!-- OSC: /matoma/perc/chaos/start|stop|density|amp|weights -->
-        <div class="perc-start-stop">
-          <button class="perc-ss-btn" id="btn-perc-toggle" onclick="percToggle()">▶ START</button>
-        </div>
-
-        <!-- DENSITY: 平均イベント数/秒 -->
-        <div class="sr" style="--thumb:var(--c-rhythmic)">
-          <div class="sl"><b>DENSITY</b></div>
-          <input type="range" min="0.5" max="20" step="0.5" value="4"
-            id="s-perc-density"
-            oninput="percParam('density',+this.value,'v-perc-density',v=>v.toFixed(1)+'/s')">
-          <div class="sv" id="v-perc-density">4.0/s</div>
-        </div>
-
-        <!-- AMP: 発音確率の強さ -->
-        <div class="sr" style="--thumb:var(--c-rhythmic)">
-          <div class="sl"><b>AMP</b></div>
-          <input type="range" min="0" max="1" step="0.01" value="0.60"
-            id="s-perc-amp"
-            oninput="percParam('amp',+this.value,'v-perc-amp')">
-          <div class="sv" id="v-perc-amp">0.60</div>
-        </div>
-
-        <!-- WEIGHTS: 楽器の選択確率 -->
-        <div class="msub">WEIGHTS</div>
-        <div class="sr" style="--thumb:var(--c-rhythmic)">
-          <div class="sl"><b>KICK</b></div>
-          <input type="range" min="0" max="1" step="0.05" value="0.40"
-            id="s-perc-w-kick" oninput="percWeights()">
-          <div class="sv" id="v-perc-w-kick">0.40</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-rhythmic)">
-          <div class="sl"><b>SNARE</b></div>
-          <input type="range" min="0" max="1" step="0.05" value="0.30"
-            id="s-perc-w-snare" oninput="percWeights()">
-          <div class="sv" id="v-perc-w-snare">0.30</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-rhythmic)">
-          <div class="sl"><b>HIHAT</b></div>
-          <input type="range" min="0" max="1" step="0.05" value="0.20"
-            id="s-perc-w-hihat" oninput="percWeights()">
-          <div class="sv" id="v-perc-w-hihat">0.20</div>
-        </div>
-        <div class="sr" style="--thumb:var(--c-rhythmic)">
-          <div class="sl"><b>CLAP</b></div>
-          <input type="range" min="0" max="1" step="0.05" value="0.10"
-            id="s-perc-w-clap" oninput="percWeights()">
-          <div class="sv" id="v-perc-w-clap">0.10</div>
-        </div>
-
-      </div>
-    </div>
-
-    <!-- TIDAL -->
-    <div class="mod" id="tidal-panel">
-      <div class="mhdr">
-        <div class="mbar" style="background:var(--c-tidal)"></div>
-        <div class="mname">TIDAL</div>
-        <span id="tidal-status" style="font-size:.57rem;color:var(--dim);margin-left:.3rem">停止</span>
-      </div>
-      <div class="mbody">
-        <div class="perc-start-stop">
-          <button class="tidal-ss-btn" id="btn-tidal-toggle" onclick="tidalToggle()">▶ START</button>
-          <button class="tidal-ss-btn" id="btn-tidal-hush" onclick="tidalHush()"
-            style="color:var(--c-warn);border-color:var(--dim)">HUSH</button>
-        </div>
-        <div class="msub">PRESET</div>
-        <div class="tidal-presets">
-          <button class="tidal-preset-btn" id="tp-minimal_klank" onclick="tidalPreset('minimal_klank')">minimal_klank</button>
-          <button class="tidal-preset-btn" id="tp-alva_euclidean" onclick="tidalPreset('alva_euclidean')">alva_euclidean</button>
-          <button class="tidal-preset-btn" id="tp-alva_phase" onclick="tidalPreset('alva_phase')">alva_phase</button>
-          <button class="tidal-preset-btn" id="tp-opn_sparse" onclick="tidalPreset('opn_sparse')">opn_sparse</button>
-          <button class="tidal-preset-btn" id="tp-chaos_collapse" onclick="tidalPreset('chaos_collapse')">chaos_collapse</button>
-        </div>
-        <div style="font-size:.57rem;color:var(--dim);margin-top:.2rem">
-          preset: <span id="tidal-current-preset" style="color:var(--c-tidal)">—</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- SONIC ANATOMY -->
-    <div class="mod" id="sa-panel">
-      <div class="mhdr">
-        <div class="mbar" style="background:var(--c-sa)"></div>
-        <div class="mname">SONIC ANATOMY</div>
-        <span id="sa-status" style="font-size:.57rem;color:var(--dim);margin-left:.3rem">未ロード</span>
-      </div>
-      <div class="mbody">
-        <div style="display:flex;gap:4px;margin-bottom:.5rem">
-          <button class="tidal-ss-btn" onclick="saLoad()">LOAD</button>
-        </div>
-        <div style="font-size:.57rem;color:var(--dim);margin-bottom:.4rem;line-height:1.6">
-          <div>track: <span id="sa-track-id" style="color:var(--text)">—</span></div>
-          <div>bpm: <span id="sa-bpm" style="color:var(--c-sa)">—</span></div>
-          <div style="margin-top:.1rem;font-size:.55rem">notes: <span id="sa-notes" style="color:var(--text)">—</span></div>
-        </div>
-        <div class="msub">APPLY</div>
-        <div style="display:flex;flex-direction:column;gap:.22rem">
-          <button class="sa-apply-btn" onclick="saApplyAll()"     id="sa-btn-all"     disabled>APPLY ALL</button>
-          <button class="sa-apply-btn" onclick="saApplyRhythm()"  id="sa-btn-rhythm"  disabled>APPLY RHYTHM</button>
-          <button class="sa-apply-btn" onclick="saApplyHarmony()" id="sa-btn-harmony" disabled>APPLY HARMONY</button>
-        </div>
-      </div>
-    </div>
-
-  </div><!-- #right-col2 -->
-
-  <!-- LOG (span all columns) -->
-  <div id="log-panel">
-    <div id="log-hdr" onclick="toggleLog()">
-      <div class="mbar" style="background:#333;width:3px;height:12px;border-radius:2px;flex-shrink:0"></div>
-      <span style="font-size:.63rem;font-weight:bold;letter-spacing:.12em;color:var(--bright)">LOG</span>
-      <span id="log-toggle" style="font-size:.57rem;color:var(--dim);margin-left:.3rem">▼ 展開</span>
-    </div>
-    <div id="log-body" style="display:none"><div id="log"></div></div>
-  </div>
-
-</main>
-
-<!-- STUDIO MODE VIEW -->
-<div id="studio-view">
-  <div class="studio-statusbar">
-    <span class="studio-stat-item">
-      <span class="sc-hb-dot" id="sc-hb-dot"></span>
-      SC&nbsp;<span id="sc-hb-text" style="color:var(--dim)">未受信</span>
-    </span>
-    <span class="studio-stat-item">Markov: <span id="studio-markov-state" style="color:#9b59b6;font-weight:bold">—</span></span>
-    <span id="osc-log-rate" class="studio-stat-item">OSC: — msg/s</span>
-    <span class="studio-stat-item" style="font-size:.56rem;color:var(--dim);margin-left:auto">ThreeLayerController → OSC → SuperCollider</span>
-  </div>
-  <div class="studio-signal-grid">
-    <div class="studio-section">
-      <div class="studio-sec-hdr" style="border-left:3px solid var(--c-drone)">DRONE</div>
-      <div class="studio-sec-body" id="studio-drone"></div>
-    </div>
-    <div class="studio-section">
-      <div class="studio-sec-hdr" style="border-left:3px solid var(--c-gran)">GRANULAR · GRAN SYNTH</div>
-      <div class="studio-sec-body" id="studio-gran"></div>
-    </div>
-    <div class="studio-section">
-      <div class="studio-sec-hdr" style="border-left:3px solid #2dd4bf">GRAN SAMPLER</div>
-      <div class="studio-sec-body" id="studio-gsamp"></div>
-    </div>
-  </div>
-  <div class="studio-osc-section">
-    <div class="studio-osc-hdr">
-      <span class="studio-osc-hdr-label">OSC LOG</span>
-      <span style="font-size:.57rem;color:var(--dim)">最近のOSC送信</span>
-    </div>
-    <div id="osc-log-body"></div>
+  <h1>MaToMa</h1>
+  <div>
+    <span id="label-energy" style="color:var(--text2);font-size:10px">E: --</span>
   </div>
 </div>
 
+<!-- ── Tabs ───────────────────────────────────── -->
+<div id="tabs">
+  <button class="tab-btn active" data-tab="flow">SIGNAL FLOW</button>
+  <button class="tab-btn" data-tab="tree">SC NODE TREE</button>
+</div>
+
+<!-- ── Signal Flow View ───────────────────────── -->
+<div id="view-flow" class="view active">
+  <div id="flow-nodes">
+    <div class="node-card selected" id="node-key" data-node="key">
+      <div class="node-label">KEY</div>
+      <div class="node-primary" id="nk-root">--</div>
+      <div class="node-secondary" id="nk-mode">--</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="node-card" id="node-harmony" data-node="harmony">
+      <div class="node-label">HARMONY</div>
+      <div class="node-primary" id="nh-state">--</div>
+      <div class="node-secondary" id="nh-remaining">--</div>
+      <div class="node-badge" id="nh-badge">stopped</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="node-card" id="node-rhythm" data-node="rhythm">
+      <div class="node-label">RHYTHM</div>
+      <div class="node-primary" id="nr-preset" style="font-size:13px">--</div>
+      <div class="node-secondary" id="nr-bpm">-- BPM</div>
+      <div class="node-badge" id="nr-badge">stopped</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="node-card" id="node-synth" data-node="synth">
+      <div class="node-label">SYNTH</div>
+      <div class="node-primary" id="ns-energy">--</div>
+      <div class="node-secondary" id="ns-nodes">-- synths</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="node-card" id="node-out" data-node="out">
+      <div class="node-label">OUT</div>
+      <div class="node-primary" id="no-status" style="font-size:13px">--</div>
+      <div class="node-secondary" id="no-sub">waiting...</div>
+    </div>
+  </div>
+
+  <div id="detail-panel"><!-- filled by JS --></div>
+</div>
+
+<!-- ── SC Node Tree View ─────────────────────── -->
+<div id="view-tree" class="view">
+  <div id="tree-status">SC 起動後に自動取得されます（6秒ごとに更新）</div>
+  <div id="tree-container"></div>
+</div>
+
 <script>
-const WS_URL = 'ws://localhost:8765';
-let ws, reconnectTimer = null, reconnectDelay = 1000;
-let currentScene      = null;
-let freezeOn          = false;
-let currentDroneGen   = null;
-let percRunning       = false;
-let currentMode       = 'live';
-let scHbLastTs        = 0;
-let _oscMsgThisSec    = 0;
-const SPARK_SAMPLES   = 60;
-const sparkBuffers    = {};
+// ── State ────────────────────────────────────────────────────────────────
+const state = {
+  ws: null,
+  selectedNode: 'key',
+  flow: { key: null, harmony: null, rhythm: null },
+  energy: null,
+  scReady: false,
+  nodeTree: null,
+  activePreset: null,
+  synthNodeData: {},
+};
 
-// PERC ステップ状態: tracks[trackIdx][stepIdx] = 0|1
-// PERC_TRACKS / percSteps はステップシーケンサー廃止により削除
+const ROOTS = ['C','Db','D','Eb','E','F','Fs','G','Ab','A','Bb','B'];
+const SCALES = ['major','minor','dorian','phrygian'];
+const MARKOV_STATES = ['void','sparse','medium','dense','intense'];
+const PRESETS = [
+  'alva_euclidean','alva_phase','opn_sparse','minimal_klank','chaos_collapse'
+];
+const PRESET_LABELS = {
+  'alva_euclidean': 'Alva Eucl',
+  'alva_phase':     'Alva Phase',
+  'opn_sparse':     'OPN Sparse',
+  'minimal_klank':  'Minimal',
+  'chaos_collapse': 'Chaos',
+};
 
-// ── WebSocket ──────────────────────────────────────────────
-function connect() {
-  ws = new WebSocket(WS_URL);
+// ── WebSocket ────────────────────────────────────────────────────────────
+function connectWS() {
+  const ws = new WebSocket('ws://localhost:8765');
+  state.ws = ws;
+
   ws.onopen = () => {
-    reconnectDelay = 1000;
-    setDot('ws', 'on');
-    addLog('ws', '接続完了');
-    // デバイスリスト取得
-    send({ address: '/matoma/audio/get_devices', args: [] });
+    setDot('dot-ws', 'ok');
+    setEl('label-ws', 'WS OK');
   };
-  ws.onclose = () => { setDot('ws', 'off'); scheduleReconnect(); };
-  ws.onerror = () => { setDot('ws', 'err'); addLog('ws_err', '接続エラー'); };
-  ws.onmessage = (e) => {
-    let m; try { m = JSON.parse(e.data); } catch { return; }
-    handleMessage(m);
+  ws.onclose = () => {
+    setDot('dot-ws', 'err');
+    setEl('label-ws', 'WS --');
+    setTimeout(connectWS, 3000);
+  };
+  ws.onerror = () => setDot('dot-ws', 'err');
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+    handleMsg(msg);
   };
 }
 
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null; connect();
-  }, reconnectDelay);
-  reconnectDelay = Math.min(reconnectDelay * 2, 5000);
+function send(address, args = []) {
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+  state.ws.send(JSON.stringify({ address, args }));
 }
 
-function send(msg) {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+// ── Message handler ──────────────────────────────────────────────────────
+function handleMsg(msg) {
+  switch (msg.type) {
+    case 'sc_status':
+      state.scReady = !!msg.ready;
+      updateSCStatus();
+      break;
+    case 'sc_ready':
+      state.scReady = true;
+      updateSCStatus();
+      break;
+    case 'sc_heartbeat':
+      setDot('dot-sc', 'ok');
+      break;
+    case 'flow_state':
+      mergeFlow(msg.flow);
+      updateFlowNodes();
+      if (state.selectedNode) rerenderIfActive(state.selectedNode, ['key','harmony','rhythm']);
+      break;
+    case 'chaos_state':
+      state.energy = msg.energy;
+      setEl('label-energy', 'E: ' + (msg.energy != null ? (msg.energy*100).toFixed(0)+'%' : '--'));
+      state.synthNodeData = msg;
+      setEl('ns-energy', msg.energy != null ? (msg.energy*100).toFixed(0)+'%' : '--');
+      rerenderIfActive('synth', ['synth']);
+      break;
+    case 'sc_node_tree':
+      state.nodeTree = msg.tree;
+      updateNodeTreeView();
+      setEl('ns-nodes', countSynths(msg.tree) + ' synths');
+      rerenderIfActive('synth', ['synth']);
+      break;
+    case 'tidal_applied':
+      state.activePreset = msg.preset;
+      if (state.flow.rhythm) state.flow.rhythm.preset = msg.preset;
+      updateFlowNodes();
+      rerenderIfActive('rhythm', ['rhythm']);
+      break;
+    case 'markov_state':
+      if (!state.flow.harmony) state.flow.harmony = {};
+      state.flow.harmony.markov_state = msg.state;
+      state.flow.harmony.running = msg.state && msg.state.running;
+      updateFlowNodes();
+      rerenderIfActive('harmony', ['harmony']);
+      break;
+    case 'score_state':
+      // music_gen からのポーリング応答（flow_state にも含まれるが念のため）
+      if (!state.flow.key) state.flow.key = {};
+      Object.assign(state.flow.key, msg);
+      updateFlowNodes();
+      rerenderIfActive('key', ['key']);
+      break;
+  }
 }
 
-// ── メッセージ受信 ─────────────────────────────────────────
-function handleMessage(m) {
-  const t = m.type;
-  if (t === 'sc_ready') { setSC('ready'); }
-  else if (t === 'sc_status')  { setSC(m.ready ? 'ready' : 'booting'); }
-  else if (t === 'sc_booting') { setSC('booting'); }
-  else if (t === 'sc_error')   { setSC('error'); addLog('sc_err', m.message || ''); }
-  else if (t === 'scene_changed') {
-    const name = m.scene && m.scene.name ? m.scene.name : m.scene;
-    if (name) highlightScene(String(name));
+function rerenderIfActive(node, watchedNodes) {
+  if (watchedNodes.includes(state.selectedNode)) {
+    renderDetail(state.selectedNode);
   }
-  else if (t === 'chaos_state' || t === 'autonomous_update') {
-    updateChaosState(m.state || m.params || m);
-  }
-  else if (t === 'chaos_started')  { setChaosRunning(true); }
-  else if (t === 'chaos_stopped')  { setChaosRunning(false); }
-  else if (t === 'audio_devices')  { updateDeviceSelect(m.current || '', m.devices || []); }
-  else if (t === 'gran_sampler_file_selected') {
-    const name = m.path ? m.path.split('/').pop() : '?';
-    document.getElementById('v-gsamp-file').textContent = name;
-    document.getElementById('v-gsamp-file').title = m.path || '';
-    addLog('/gran_sampler', 'loading: ' + name);
-  }
-  else if (t === 'gran_sampler_loaded') {
-    const name = m.path ? m.path.split('/').pop() : '?';
-    document.getElementById('v-gsamp-file').textContent =
-      name + ' (' + m.duration + 's)';
-    addLog('/gran_sampler', 'loaded: ' + name);
-  }
-  else if (t === 'gran_sampler_load_error') {
-    document.getElementById('v-gsamp-file').textContent = '⚠ ' + m.message;
-    addLog('/gran_sampler', 'error: ' + m.message);
-  }
-  else if (t === 'tidal_started')  { setTidalRunning(true);  addLog('/tidal', 'started'); }
-  else if (t === 'tidal_stopped')  { setTidalRunning(false); addLog('/tidal', 'stopped'); }
-  else if (t === 'tidal_error')    { addLog('/tidal/err', m.message || ''); }
-  else if (t === 'tidal_applied')  { tidalPresetApplied(m.preset); addLog('/tidal', 'applied: ' + (m.preset || '')); }
-  else if (t === 'tidal_state')    { if (m.state) { setTidalRunning(!!m.state.running); if (m.state.preset) tidalPresetApplied(m.state.preset); } }
-  else if (t === 'markov_state')   { updateMarkovState(m.state || {}); }
-  else if (t === 'sonic_anatomy_seed') {
-    updateSonicAnatomyUI(m);
-    addLog('/sonic_anatomy', 'loaded: ' + (m.track_id || '?') + ' bpm=' + (m.bpm || '?'));
-  }
-  else if (t === 'sonic_anatomy_applied') {
-    addLog('/sonic_anatomy', 'applied: ' + (m.mode || 'all'));
-    const flashId = m.mode === 'rhythm' ? 'sa-btn-rhythm'
-                  : m.mode === 'harmony' ? 'sa-btn-harmony' : 'sa-btn-all';
-    const btn = document.getElementById(flashId);
-    if (btn) { btn.classList.add('flash'); setTimeout(() => btn.classList.remove('flash'), 1200); }
-  }
-  else if (t === 'sonic_anatomy_error') {
-    const st = document.getElementById('sa-status');
-    if (st) { st.textContent = 'エラー'; st.style.color = '#f87171'; }
-    addLog('/sonic_anatomy/err', m.message || 'error');
-  }
-  else if (t === 'osc_sent')       { addOscLogEntry(m); }
-  else if (t === 'sc_heartbeat')   { scHbLastTs = m.ts || (Date.now() / 1000); }
-  else { addLog(t || m.address || '?', JSON.stringify(m.args || m.params || {})); }
 }
 
-// ── 状態ドット ─────────────────────────────────────────────
-function setDot(id, state) {
-  const el = document.getElementById(id + '-dot');
-  if (!el) return;
-  el.className = 'dot' + (state === 'on' ? ' on' : state === 'warn' ? ' warn' : '');
+function mergeFlow(flow) {
+  if (!flow) return;
+  if (flow.key) {
+    if (!state.flow.key) state.flow.key = {};
+    Object.assign(state.flow.key, flow.key);
+  }
+  if (flow.harmony) {
+    if (!state.flow.harmony) state.flow.harmony = {};
+    Object.assign(state.flow.harmony, flow.harmony);
+  }
+  if (flow.rhythm) {
+    if (!state.flow.rhythm) state.flow.rhythm = {};
+    Object.assign(state.flow.rhythm, flow.rhythm);
+  }
 }
 
-function setSC(state) {
-  const d = document.getElementById('sc-dot');
-  const t = document.getElementById('sc-label');
-  if (state === 'ready')   { d.className = 'dot on';  t.textContent = 'SC: ready';   t.style.color = 'var(--c-scene)'; }
-  else if (state === 'booting') { d.className = 'dot warn'; t.textContent = 'SC: boot...'; t.style.color = 'var(--c-warn)'; }
-  else                     { d.className = 'dot err'; t.textContent = 'SC: error';   t.style.color = '#f87171'; }
+// ── Node card updates ─────────────────────────────────────────────────────
+function updateFlowNodes() {
+  const { key, harmony, rhythm } = state.flow;
+
+  if (key) {
+    setEl('nk-root', key.root || '--');
+    setEl('nk-mode', key.mode || '--');
+  }
+  if (harmony) {
+    const ms = harmony.markov_state || {};
+    setEl('nh-state', ms.state || '--');
+    setEl('nh-remaining', ms.remaining != null ? ms.remaining.toFixed(0) + 's' : '--');
+    const badge = document.getElementById('nh-badge');
+    if (badge) {
+      badge.textContent = ms.running ? 'running' : 'stopped';
+      badge.className = 'node-badge' + (ms.running ? ' running' : '');
+    }
+  }
+  if (rhythm) {
+    const pl = PRESET_LABELS[rhythm.preset] || rhythm.preset || '--';
+    setEl('nr-preset', pl);
+    setEl('nr-bpm', rhythm.tempo_bpm != null ? rhythm.tempo_bpm.toFixed(0) + ' BPM' : '-- BPM');
+    const badge = document.getElementById('nr-badge');
+    if (badge) {
+      badge.textContent = rhythm.running ? 'running' : 'stopped';
+      badge.className = 'node-badge' + (rhythm.running ? ' running' : '');
+    }
+  }
 }
 
-// ── SCENE ─────────────────────────────────────────────────
-const SCENES = ['void','warm','vast','lost'];
-
-function selectScene(name) {
-  send({ address: '/matoma/scene', args: [name] });
-  highlightScene(name);
-  addLog('/scene', name);
+function updateSCStatus() {
+  setDot('dot-sc', state.scReady ? 'ok' : 'warn');
+  setEl('label-sc', state.scReady ? 'SC OK' : 'SC --');
+  setEl('no-status', state.scReady ? 'READY' : 'OFFLINE');
+  const el = document.getElementById('no-status');
+  if (el) el.style.color = state.scReady ? 'var(--accent)' : 'var(--danger)';
+  setEl('no-sub', state.scReady ? 'SC server' : 'waiting...');
 }
 
-function highlightScene(name) {
-  currentScene = name;
-  SCENES.forEach(s => {
-    const b = document.getElementById('scb-' + s);
-    if (b) b.classList.toggle('on', s === name);
+function countSynths(node) {
+  if (!node) return 0;
+  if (node.type === 'synth') return 1;
+  return (node.children || []).reduce((s, c) => s + countSynths(c), 0);
+}
+function collectSynths(node) {
+  if (!node) return [];
+  if (node.type === 'synth') return [node];
+  return (node.children || []).flatMap(collectSynths);
+}
+
+// ── Node selection ────────────────────────────────────────────────────────
+document.querySelectorAll('.node-card').forEach(card => {
+  card.addEventListener('click', () => {
+    document.querySelectorAll('.node-card').forEach(c => c.classList.remove('selected'));
+    card.classList.add('selected');
+    state.selectedNode = card.dataset.node;
+    renderDetail(state.selectedNode);
   });
-}
-
-// ── FLUTE (3本の笛) ────────────────────────────────────────
-function fluteSend(param, rawVal, vidId, fmt) {
-  const v = parseFloat(rawVal);
-  const el = document.getElementById(vidId);
-  if (el) el.textContent = fmt(v);
-  send({ address: '/matoma/flute/' + param, args: [v] });
-}
-
-// ── ENERGY ────────────────────────────────────────────────
-function energySend(rawVal) {
-  const v = parseFloat(rawVal);
-  document.getElementById('v-energy').textContent = v.toFixed(2);
-  send({ address: '/matoma/energy/set', args: [v] });
-}
-
-// ── BPM ───────────────────────────────────────────────────
-function bpmSend(rawVal) {
-  const v = Math.round(parseFloat(rawVal));
-  document.getElementById('v-bpm').textContent = v;
-  // シーケンサー・パーカッション両方に送る
-  send({ address: '/matoma/seq/bpm',  args: [v] });
-  send({ address: '/matoma/perc/bpm', args: [v] });
-}
-
-// ── DRIVE ─────────────────────────────────────────────────
-function driveSend(rawVal) {
-  const v = parseFloat(rawVal);
-  document.getElementById('v-drive').textContent = v.toFixed(2);
-  send({ address: '/matoma/spectral/wavefold/drive', args: [v] });
-}
-
-// ── FREEZE ────────────────────────────────────────────────
-function freezeToggle() {
-  freezeOn = !freezeOn;
-  const btn = document.getElementById('btn-freeze');
-  if (btn) {
-    btn.textContent = freezeOn ? 'ON' : 'OFF';
-    btn.classList.toggle('on', freezeOn);
-  }
-  send({ address: '/matoma/spectral/freeze', args: [freezeOn ? 1.0 : 0.0] });
-  addLog('/freeze', freezeOn ? 'ON' : 'OFF');
-}
-
-// ── MASTER ────────────────────────────────────────────────
-function masterSend(rawVal) {
-  const v = parseFloat(rawVal);
-  document.getElementById('v-master').textContent = v.toFixed(2);
-  send({ address: '/matoma/master/amp', args: [v] });
-}
-
-// ── CHAOS ENGINE コントロール ──────────────────────────────
-let chaosRunning = false;
-
-function chaosToggle() {
-  const btn = document.getElementById('btn-chaos-toggle');
-  chaosRunning = !chaosRunning;
-  if (chaosRunning) {
-    btn.classList.add('on');
-    btn.textContent = 'STOP';
-    send({ address: '/matoma/chaos/start', args: [] });
-  } else {
-    btn.classList.remove('on');
-    btn.textContent = 'START';
-    send({ address: '/matoma/chaos/stop', args: [] });
-  }
-}
-
-function chaosSend(address, val, vid) {
-  document.getElementById(vid).textContent = val.toFixed(2);
-  send({ address, args: [val] });
-}
-
-// ── CHAOS STATE 可視化 ─────────────────────────────────────
-function setChaosRunning(on) {
-  chaosRunning = on;
-  const body   = document.getElementById('chaos-body');
-  const status = document.getElementById('chaos-status');
-  const btn    = document.getElementById('btn-chaos-toggle');
-  if (body)   body.classList.toggle('chaos-running', on);
-  if (status) {
-    status.textContent = on ? '動作中' : '待機';
-    status.style.color = on ? 'var(--c-auto)' : 'var(--dim)';
-  }
-  if (btn) {
-    btn.textContent = on ? 'STOP' : 'START';
-    on ? btn.classList.add('on') : btn.classList.remove('on');
-  }
-}
-
-function _unpack(entry) {
-  if (entry != null && typeof entry === 'object') {
-    return { val: entry.value, att: entry.attractor };
-  }
-  return { val: entry, att: null };
-}
-
-function updateChaosState(params) {
-  if (!params) return;
-  if (params.drone) {
-    const d = params.drone;
-    const rows = [
-      { key:'drone-freq',     src:d.freq,        min:20,  max:200, fmt:v=>Math.round(v).toString() },
-      { key:'drone-feedback', src:d.feedback_amt, min:0,   max:0.9, fmt:v=>v.toFixed(2) },
-      { key:'drone-room',     src:d.room,         min:0,   max:1,   fmt:v=>v.toFixed(2) },
-    ];
-    for (const r of rows) { if (r.src != null) { const u=_unpack(r.src); updateChaosBar(r.key,u.val,u.att,r.min,r.max,r.fmt); } }
-  }
-  if (params.granular) {
-    const g = params.granular;
-    const rows = [
-      { key:'gran-density', src:g.density, min:1,  max:80, fmt:v=>Math.round(v).toString() },
-      { key:'gran-spray',   src:g.spray,   min:0,  max:1,  fmt:v=>v.toFixed(2) },
-    ];
-    for (const r of rows) { if (r.src != null) { const u=_unpack(r.src); updateChaosBar(r.key,u.val,u.att,r.min,r.max,r.fmt); } }
-  }
-  if (params.gran_synth) {
-    const g = params.gran_synth;
-    const rows = [
-      { key:'gsynth-density', src:g.density, min:1, max:80, fmt:v=>Math.round(v).toString() },
-      { key:'gsynth-bright',  src:g.bright,  min:0, max:1,  fmt:v=>v.toFixed(2) },
-      { key:'gsynth-chaos',   src:g.chaos,   min:0, max:1,  fmt:v=>v.toFixed(2) },
-    ];
-    for (const r of rows) { if (r.src != null) { const u=_unpack(r.src); updateChaosBar(r.key,u.val,u.att,r.min,r.max,r.fmt); } }
-  }
-  if (params.gran_sampler) {
-    const s = params.gran_sampler;
-    const rows = [
-      { key:'gsamp-density', src:s.density, min:1, max:80, fmt:v=>Math.round(v).toString() },
-      { key:'gsamp-spray',   src:s.spray,   min:0, max:1,  fmt:v=>v.toFixed(2) },
-      { key:'gsamp-pos',     src:s.pos,     min:0, max:1,  fmt:v=>v.toFixed(2) },
-    ];
-    for (const r of rows) { if (r.src != null) { const u=_unpack(r.src); updateChaosBar(r.key,u.val,u.att,r.min,r.max,r.fmt); } }
-  }
-  if (params.rhythmic && params.rhythmic.prob != null) {
-    const u = _unpack(params.rhythmic.prob);
-    const pct = (u.val * 100).toFixed(1);
-    const bar = document.getElementById('cb-ch-prob');
-    const vEl = document.getElementById('v-ch-prob');
-    if (bar) bar.style.width = pct + '%';
-    if (vEl) vEl.textContent = u.val.toFixed(2);
-  }
-  drawAllSparklines();
-}
-
-function updateChaosBar(key, value, attractor, min, max, fmt) {
-  const pct = v => Math.max(0, Math.min(100, ((v - min) / (max - min)) * 100));
-  const bar = document.getElementById('cb-' + key);
-  const val = document.getElementById('cv-' + key);
-  const att = document.getElementById('ca-' + key);
-  if (value   != null && bar) bar.style.width = pct(value) + '%';
-  if (value   != null && val) val.textContent = fmt(value);
-  if (att) {
-    if (attractor != null) { att.style.left = pct(attractor) + '%'; att.style.display = ''; }
-    else { att.style.display = 'none'; }
-  }
-  if (value != null) studioTrackParam(key, value, min, max, fmt);
-}
-
-// ── 音声デバイス ──────────────────────────────────────────
-function updateDeviceSelect(current, devices) {
-  const sel = document.getElementById('device-select');
-  if (!sel) return;
-  sel.innerHTML = '<option value="">(システムデフォルト)</option>';
-  devices.forEach(dev => {
-    const opt = document.createElement('option');
-    opt.value = dev;
-    opt.textContent = dev.length > 28 ? dev.slice(0, 26) + '…' : dev;
-    opt.title = dev;
-    opt.selected = dev === current;
-    sel.appendChild(opt);
-  });
-}
-
-function onDeviceChange(value) {
-  const label = value || 'システムデフォルト';
-  if (!confirm(`音声を「${label}」に切り替えます。\nSuperCollider を再起動します。OK？`)) {
-    send({ address: '/matoma/audio/get_devices', args: [] }); return;
-  }
-  send({ address: '/matoma/audio/set_device', args: [value] });
-  addLog('AUDIO', '切替 → ' + label);
-}
-
-// ── ヘッダーボタン ────────────────────────────────────────
-function testTone() {
-  send({ address: '/matoma/test_tone', args: [] });
-  const btn = document.getElementById('btn-test');
-  if (btn) { btn.textContent = '♪ ...'; setTimeout(()=>{btn.textContent='♪ TEST';},1000); }
-}
-
-function stopAll() {
-  send({ address: '/matoma/all/stop', args: [] });
-  // 全トグルボタンの状態をリセット（UIのみ、OSCはall/stopで一括送信済み）
-  droneAllStop();
-  glitchAllStop();
-  ['delay','feedback'].forEach(fx => {
-    fxState[fx] = false;
-    const btn = document.getElementById('fx-' + fx + '-toggle');
-    if (btn) btn.classList.remove('on');
-  });
-  percRunning = false;
-  const percBtn = document.getElementById('btn-perc-toggle');
-  if (percBtn) percBtn.classList.remove('on');
-  const percSt = document.getElementById('perc-status');
-  if (percSt) { percSt.textContent = '停止'; percSt.style.color = 'var(--dim)'; }
-  setMarkovRunning(false);
-  addLog('STOP', '全停止');
-}
-
-function restartAll() {
-  const btn = document.getElementById('btn-restart');
-  if (btn) { btn.textContent = '↺ ...'; btn.style.opacity = '0.5'; }
-  send({ address: '/matoma/all/restart', args: [] });
-  addLog('RESTART', '再セットアップ中...');
-  setTimeout(()=>{ if(btn){btn.textContent='↺ RESTART';btn.style.opacity='1';} }, 3000);
-}
-
-// ── LOG ───────────────────────────────────────────────────
-function addLog(addr, val) {
-  const box = document.getElementById('log');
-  if (!box) return;
-  const now = new Date();
-  const t = now.toTimeString().slice(0, 8);
-  const le = document.createElement('div');
-  le.className = 'le';
-  const ltEl = document.createElement('span'); ltEl.className = 'lt'; ltEl.textContent = t;
-  const laEl = document.createElement('span'); laEl.className = 'la'; laEl.textContent = addr;
-  const lvEl = document.createElement('span'); lvEl.className = 'lv'; lvEl.textContent = val;
-  le.append(ltEl, laEl, lvEl);
-  box.prepend(le);
-  if (box.children.length > 60) box.removeChild(box.lastChild);
-}
-
-function toggleLog() {
-  const body = document.getElementById('log-body');
-  const hint = document.getElementById('log-toggle');
-  const show = body.style.display === 'none';
-  body.style.display = show ? '' : 'none';
-  hint.textContent = show ? '▲ 折りたたむ' : '▼ 展開';
-}
-
-// ── DRONE GENERATOR ───────────────────────────────────────
-const DRONE_GENS = ['klank','fm','noise','wavetable','feedback','sines'];
-// 複数同時ON可能にするため Set で管理
-const activeDroneGens = new Set();
-
-function droneToggle(gen) {
-  // KLANKは専用のOSCアドレスを使用する
-  const stopAddr  = gen === 'klank' ? '/matoma/drone/stop'  : '/matoma/drone/' + gen + '/stop';
-  const startAddr = gen === 'klank' ? '/matoma/drone/start' : '/matoma/drone/' + gen + '/start';
-
-  if (activeDroneGens.has(gen)) {
-    // ONになっているので OFF にする
-    send({ address: stopAddr, args: [] });
-    activeDroneGens.delete(gen);
-    const b = document.getElementById('drone-btn-' + gen);
-    if (b) b.classList.remove('on');
-    addLog('/drone', gen + ' stop');
-  } else {
-    // OFFになっているので ON にする
-    send({ address: startAddr, args: [] });
-    activeDroneGens.add(gen);
-    const b = document.getElementById('drone-btn-' + gen);
-    if (b) b.classList.add('on');
-    addLog('/drone', gen + ' start');
-  }
-  // 旧変数との互換：最後に操作したジェネレーターを保持
-  currentDroneGen = activeDroneGens.size > 0 ? gen : null;
-}
-
-function droneAllStop() {
-  send({ address: '/matoma/drone/all/stop', args: [] });
-  activeDroneGens.clear();
-  currentDroneGen = null;
-  DRONE_GENS.forEach(g => {
-    const b = document.getElementById('drone-btn-' + g);
-    if (b) b.classList.remove('on');
-  });
-  addLog('/drone', 'all stop');
-}
-
-// ── EFFECT ────────────────────────────────────────────────
-// エフェクトごとのON/OFF状態を管理
-const fxState = {};
-
-function fxToggle(fx) {
-  const isActive = fxState[fx] || false;
-  const btn = document.getElementById('fx-' + fx + '-toggle');
-  if (isActive) {
-    send({ address: '/matoma/effect/' + fx + '/stop', args: [] });
-    fxState[fx] = false;
-    if (btn) btn.classList.remove('on');
-    addLog('/effect/' + fx, 'stop');
-  } else {
-    send({ address: '/matoma/effect/' + fx + '/start', args: [] });
-    fxState[fx] = true;
-    if (btn) btn.classList.add('on');
-    addLog('/effect/' + fx, 'start');
-  }
-}
-
-function fxParam(fx, param, rawVal, vidId, fmt) {
-  const v = parseFloat(rawVal);
-  const el = document.getElementById(vidId);
-  if (el) el.textContent = fmt(v);
-  send({ address: '/matoma/effect/' + fx + '/param', args: [param, v] });
-}
-
-// ── PERC (CHAOS ENGINE) ───────────────────────────────────
-// percussion.scd は CHAOS ENGINE（ポアソン過程）のみで駆動
-// OSC: /matoma/perc/chaos/start|stop|density|amp|weights
-
-function percToggle() {
-  percRunning = !percRunning;
-  const btn = document.getElementById('btn-perc-toggle');
-  const st  = document.getElementById('perc-status');
-  if (percRunning) {
-    send({ address: '/matoma/perc/chaos/start', args: [] });
-    if (btn) { btn.classList.add('on'); btn.textContent = '■ STOP'; }
-    if (st)  { st.textContent = '動作中'; st.style.color = 'var(--c-rhythmic)'; }
-    addLog('/perc/chaos', 'start');
-  } else {
-    send({ address: '/matoma/perc/chaos/stop', args: [] });
-    if (btn) { btn.classList.remove('on'); btn.textContent = '▶ START'; }
-    if (st)  { st.textContent = '停止'; st.style.color = 'var(--dim)'; }
-    addLog('/perc/chaos', 'stop');
-  }
-}
-
-// density: 平均イベント数/秒 → /matoma/perc/chaos/density
-// amp: 発音確率の強さ → /matoma/perc/chaos/amp
-function percParam(sub, val, vid, fmt) {
-  document.getElementById(vid).textContent = fmt ? fmt(val) : val.toFixed(2);
-  send({ address: '/matoma/perc/chaos/' + sub, args: [val] });
-}
-
-// weights: kick/snare/hihat/clap の選択重み → /matoma/perc/chaos/weights
-function percWeights() {
-  const k = +document.getElementById('s-perc-w-kick').value;
-  const s = +document.getElementById('s-perc-w-snare').value;
-  const h = +document.getElementById('s-perc-w-hihat').value;
-  const c = +document.getElementById('s-perc-w-clap').value;
-  document.getElementById('v-perc-w-kick').textContent  = k.toFixed(2);
-  document.getElementById('v-perc-w-snare').textContent = s.toFixed(2);
-  document.getElementById('v-perc-w-hihat').textContent = h.toFixed(2);
-  document.getElementById('v-perc-w-clap').textContent  = c.toFixed(2);
-  send({ address: '/matoma/perc/chaos/weights', args: [k, s, h, c] });
-}
-
-// ── TIDAL ─────────────────────────────────────────────────
-let tidalRunning = false;
-const TIDAL_PRESETS = ['minimal_klank','alva_euclidean','alva_phase','opn_sparse','chaos_collapse'];
-
-// ── Markov タイムスケール ────────────────────────────────────
-let markovRunning = false;
-
-function markovToggle() {
-  markovRunning = !markovRunning;
-  if (markovRunning) {
-    send({ address: '/matoma/markov/start', args: [] });
-    addLog('/markov', 'start');
-  } else {
-    send({ address: '/matoma/markov/stop', args: [] });
-    addLog('/markov', 'stop');
-  }
-  setMarkovRunning(markovRunning);
-}
-
-function setMarkovRunning(running) {
-  markovRunning = running;
-  const btn = document.getElementById('btn-markov-toggle');
-  const status = document.getElementById('markov-status');
-  if (btn) {
-    btn.textContent = running ? '■ MARKOV' : '▶ MARKOV';
-    btn.style.color = running ? 'var(--c-auto)' : '';
-    btn.style.borderColor = running ? 'var(--c-auto)' : '';
-  }
-  if (status) status.textContent = running ? '稼働中' : '停止';
-}
-
-function updateMarkovState(state) {
-  if (!state) return;
-  if (typeof state.running !== 'undefined') setMarkovRunning(!!state.running);
-  const cur = document.getElementById('markov-current-state');
-  if (cur && state.state) cur.textContent = state.state;
-  const rem = document.getElementById('markov-remaining');
-  if (rem && typeof state.remaining !== 'undefined') rem.textContent = Math.round(state.remaining) + 's';
-  const sldr = document.getElementById('markov-interval');
-  const val = document.getElementById('markov-interval-val');
-  if (sldr && state.interval) { sldr.value = state.interval; if (val) val.textContent = state.interval + 's'; }
-  if (typeof state.speed !== 'undefined') {
-    const pct = Math.min(100, state.speed / 2 * 100).toFixed(1);
-    const bar = document.getElementById('cb-ch-spd');
-    const vEl = document.getElementById('v-ch-spd');
-    if (bar) bar.style.width = pct + '%';
-    if (vEl) vEl.textContent = state.speed.toFixed(2);
-  }
-  if (typeof state.dejavu_prob !== 'undefined') {
-    const pct = (state.dejavu_prob * 100).toFixed(1);
-    const bar = document.getElementById('cb-ch-dej');
-    const vEl = document.getElementById('v-ch-dej');
-    if (bar) bar.style.width = pct + '%';
-    if (vEl) vEl.textContent = state.dejavu_prob.toFixed(2);
-  }
-  updateStudioMarkov(state);
-}
-
-function tidalToggle() {
-  tidalRunning = !tidalRunning;
-  if (tidalRunning) {
-    send({ address: '/matoma/tidal/start', args: [] });
-    addLog('/tidal', 'start');
-  } else {
-    send({ address: '/matoma/tidal/stop', args: [] });
-    addLog('/tidal', 'stop');
-  }
-  setTidalRunning(tidalRunning);
-}
-
-function tidalHush() {
-  send({ address: '/matoma/tidal/hush', args: [] });
-  addLog('/tidal', 'hush');
-}
-
-function tidalPreset(name) {
-  send({ address: '/matoma/tidal/preset', args: [name] });
-  tidalPresetApplied(name);
-  addLog('/tidal/preset', name);
-}
-
-function tidalPresetApplied(name) {
-  TIDAL_PRESETS.forEach(p => {
-    const b = document.getElementById('tp-' + p);
-    if (b) b.classList.toggle('on', p === name);
-  });
-  const cur = document.getElementById('tidal-current-preset');
-  if (cur) cur.textContent = name || '—';
-}
-
-function setTidalRunning(on) {
-  tidalRunning = on;
-  const btn = document.getElementById('btn-tidal-toggle');
-  const st  = document.getElementById('tidal-status');
-  if (on) {
-    if (btn) { btn.classList.add('on'); btn.textContent = '■ STOP'; }
-    if (st)  { st.textContent = '動作中'; st.style.color = 'var(--c-tidal)'; }
-  } else {
-    if (btn) { btn.classList.remove('on'); btn.textContent = '▶ START'; }
-    if (st)  { st.textContent = '停止'; st.style.color = 'var(--dim)'; }
-  }
-}
-
-// ── キーボードショートカット ──────────────────────────────
-document.addEventListener('keydown', e => {
-  // 入力フィールドにフォーカス中は無視
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  if (e.key >= '1' && e.key <= '4') selectScene(SCENES[parseInt(e.key) - 1]);
 });
 
-// ── SONIC ANATOMY ──────────────────────────────────────
-let _saCurrentSeed = null;
-
-function saLoad() {
-  send({ address: '/matoma/sonic_anatomy/load', args: [] });
-  addLog('/sonic_anatomy', 'load random...');
-  const st = document.getElementById('sa-status');
-  if (st) { st.textContent = 'ロード中...'; st.style.color = 'var(--dim)'; }
+function renderDetail(node) {
+  const panel = document.getElementById('detail-panel');
+  switch (node) {
+    case 'key':     panel.innerHTML = detailKey();     bindKey();     break;
+    case 'harmony': panel.innerHTML = detailHarmony(); bindHarmony(); break;
+    case 'rhythm':  panel.innerHTML = detailRhythm();  bindRhythm();  break;
+    case 'synth':   panel.innerHTML = detailSynth();   bindSynth();   break;
+    case 'out':     panel.innerHTML = detailOut();     bindOut();     break;
+  }
 }
 
-function saApplyAll() {
-  if (!_saCurrentSeed) return;
-  send({ address: '/matoma/sonic_anatomy/apply', args: [] });
-  addLog('/sonic_anatomy', 'apply all');
+// ── KEY detail ────────────────────────────────────────────────────────────
+function detailKey() {
+  const key = state.flow.key || {};
+  const root = key.root || 'C';
+  const mode = key.mode || 'major';
+  const density = key.density_override;
+  const densityVal = density != null ? density.toFixed(2) : '0.50';
+  const running = key.running;
+
+  const rootBtns = ROOTS.map(r =>
+    `<button class="btn${r===root?' active':''}" data-root="${r}">${r}</button>`
+  ).join('');
+  const scaleBtns = SCALES.map(s =>
+    `<button class="btn${s===mode?' active':''}" data-scale="${s}">${s}</button>`
+  ).join('');
+
+  return `<div class="detail-title">KEY — キーとスケール</div>
+    <div class="detail-section">
+      <div class="detail-section-label">ROOT</div>
+      <div class="btn-group" id="root-btns">${rootBtns}</div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">SCALE</div>
+      <div class="btn-group" id="scale-btns">${scaleBtns}</div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">DENSITY</div>
+      <div class="slider-row">
+        <label>onset</label>
+        <input type="range" id="density-sl" min="0" max="1" step="0.01" value="${densityVal}">
+        <span class="val" id="density-val">${densityVal}</span>
+      </div>
+    </div>
+    <hr class="divider">
+    <div class="detail-section">
+      <div class="detail-section-label">MUSIC GENERATOR</div>
+      <div class="btn-group">
+        <button class="btn primary" id="btn-mg-start">START</button>
+        <button class="btn danger" id="btn-mg-stop">STOP</button>
+      </div>
+      <div style="margin-top:6px;color:var(--text2);font-size:10px">
+        ${running != null ? (running ? '● 動作中' : '■ 停止中') : ''}
+      </div>
+    </div>
+    ${key.tidal_lines && key.tidal_lines.length ? `<div class="detail-section">
+      <div class="detail-section-label">LAST TIDAL LINES</div>
+      ${key.tidal_lines.map(l=>`<div class="tidal-line">${esc(l)}</div>`).join('')}
+    </div>` : ''}`;
 }
 
-function saApplyRhythm() {
-  if (!_saCurrentSeed) return;
-  send({ address: '/matoma/sonic_anatomy/apply_rhythm', args: [] });
-  addLog('/sonic_anatomy', 'apply rhythm');
+function bindKey() {
+  document.querySelectorAll('#root-btns .btn').forEach(b =>
+    b.addEventListener('click', () => send('/matoma/music_gen/set_root', [b.dataset.root])));
+  document.querySelectorAll('#scale-btns .btn').forEach(b =>
+    b.addEventListener('click', () => send('/matoma/music_gen/set_scale', [b.dataset.scale])));
+  const sl = q('density-sl'), vl = q('density-val');
+  if (sl) {
+    sl.addEventListener('input', () => { if(vl) vl.textContent = (+sl.value).toFixed(2); });
+    sl.addEventListener('change', () => send('/matoma/music_gen/set_density', [+sl.value]));
+  }
+  q('btn-mg-start')?.addEventListener('click', () => send('/matoma/music_gen/start'));
+  q('btn-mg-stop')?.addEventListener('click',  () => send('/matoma/music_gen/stop'));
 }
 
-function saApplyHarmony() {
-  if (!_saCurrentSeed) return;
-  send({ address: '/matoma/sonic_anatomy/apply_harmony', args: [] });
-  addLog('/sonic_anatomy', 'apply harmony');
+// ── HARMONY detail ────────────────────────────────────────────────────────
+function detailHarmony() {
+  const h = state.flow.harmony || {};
+  const ms = h.markov_state || {};
+  const curState = ms.state || 'medium';
+  const running = !!ms.running;
+  const interval = ms.interval || 60;
+  const elapsed = ms.elapsed || 0;
+  const remaining = ms.remaining || 0;
+  const pct = interval > 0 ? (elapsed / interval * 100).toFixed(1) : 0;
+
+  const stateBtns = MARKOV_STATES.map(s =>
+    `<button class="btn${s===curState?' active':''}" data-mstate="${s}">${s}</button>`
+  ).join('');
+
+  return `<div class="detail-title">HARMONY — Markov タイムスケール</div>
+    <div class="detail-section">
+      <div class="detail-section-label">STATE</div>
+      <div class="btn-group" id="markov-state-btns">${stateBtns}</div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">INTERVAL</div>
+      <div class="slider-row">
+        <label>seconds</label>
+        <input type="range" id="interval-sl" min="10" max="300" step="10" value="${interval}">
+        <span class="val" id="interval-val">${interval}s</span>
+      </div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">PROGRESS</div>
+      <div style="color:var(--text2);font-size:10px;margin-bottom:4px">
+        elapsed ${elapsed.toFixed(0)}s / remaining ${remaining.toFixed(0)}s
+      </div>
+      <div class="energy-bar-wrap">
+        <div class="energy-bar-fill" style="width:${pct}%"></div>
+      </div>
+    </div>
+    <hr class="divider">
+    <div class="detail-section">
+      <div class="btn-group">
+        <button class="btn primary" id="btn-mk-start">START</button>
+        <button class="btn danger" id="btn-mk-stop">STOP</button>
+      </div>
+      <div style="margin-top:6px;color:var(--text2);font-size:10px">
+        ${running ? '● Markov 動作中' : '■ Markov 停止中'}
+      </div>
+    </div>`;
 }
 
-function updateSonicAnatomyUI(seed) {
-  _saCurrentSeed = seed;
-  const st = document.getElementById('sa-status');
-  if (st) { st.textContent = 'ロード済'; st.style.color = 'var(--c-sa)'; }
-  const trackEl = document.getElementById('sa-track-id');
-  if (trackEl) trackEl.textContent = seed.track_id || '—';
-  const bpmEl = document.getElementById('sa-bpm');
-  if (bpmEl) bpmEl.textContent = seed.bpm ? seed.bpm.toFixed(1) : '—';
-  const notesEl = document.getElementById('sa-notes');
-  if (notesEl) notesEl.textContent = seed.notes || '—';
-  ['sa-btn-all', 'sa-btn-rhythm', 'sa-btn-harmony'].forEach(id => {
-    const btn = document.getElementById(id);
-    if (btn) btn.disabled = false;
+function bindHarmony() {
+  document.querySelectorAll('#markov-state-btns .btn').forEach(b =>
+    b.addEventListener('click', () => send('/matoma/markov/set_state', [b.dataset.mstate])));
+  const sl = q('interval-sl'), vl = q('interval-val');
+  if (sl) {
+    sl.addEventListener('input', () => { if(vl) vl.textContent = sl.value + 's'; });
+    sl.addEventListener('change', () => send('/matoma/markov/interval', [+sl.value]));
+  }
+  q('btn-mk-start')?.addEventListener('click', () => send('/matoma/markov/start'));
+  q('btn-mk-stop')?.addEventListener('click',  () => send('/matoma/markov/stop'));
+}
+
+// ── RHYTHM detail ─────────────────────────────────────────────────────────
+function detailRhythm() {
+  const r = state.flow.rhythm || {};
+  const preset = r.preset || state.activePreset || '';
+  const bpm = r.tempo_bpm || 120;
+  const running = !!r.running;
+
+  const presetBtns = PRESETS.map(p =>
+    `<button class="btn${p===preset?' active':''}" data-preset="${p}">${PRESET_LABELS[p]||p}</button>`
+  ).join('');
+
+  return `<div class="detail-title">RHYTHM — Tidal Cycles</div>
+    <div class="detail-section">
+      <div class="detail-section-label">PRESET</div>
+      <div class="btn-group" id="preset-btns">${presetBtns}</div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">TEMPO</div>
+      <div class="slider-row">
+        <label>BPM</label>
+        <input type="range" id="bpm-sl" min="40" max="200" step="1" value="${bpm.toFixed(0)}">
+        <span class="val" id="bpm-val">${bpm.toFixed(0)}</span>
+      </div>
+    </div>
+    <hr class="divider">
+    <div class="detail-section">
+      <div class="btn-group">
+        <button class="btn primary" id="btn-tidal-start">START</button>
+        <button class="btn" id="btn-tidal-hush">HUSH</button>
+        <button class="btn danger" id="btn-tidal-stop">STOP</button>
+      </div>
+      <div style="margin-top:6px;color:var(--text2);font-size:10px">
+        ${running ? '● Tidal 動作中' : '■ Tidal 停止中'}
+      </div>
+    </div>`;
+}
+
+function bindRhythm() {
+  document.querySelectorAll('#preset-btns .btn').forEach(b =>
+    b.addEventListener('click', () => send('/matoma/tidal/preset', [b.dataset.preset])));
+  const sl = q('bpm-sl'), vl = q('bpm-val');
+  if (sl) {
+    sl.addEventListener('input', () => { if(vl) vl.textContent = sl.value; });
+    sl.addEventListener('change', () => send('/matoma/tidal/tempo', [+sl.value]));
+  }
+  q('btn-tidal-start')?.addEventListener('click', () => send('/matoma/tidal/start'));
+  q('btn-tidal-hush')?.addEventListener('click',  () => send('/matoma/tidal/hush'));
+  q('btn-tidal-stop')?.addEventListener('click',  () => send('/matoma/tidal/stop'));
+}
+
+// ── SYNTH detail ──────────────────────────────────────────────────────────
+function detailSynth() {
+  const e = state.energy;
+  const pct = e != null ? (e * 100).toFixed(1) : '0';
+  const synths = collectSynths(state.nodeTree);
+  const synthList = synths.length
+    ? synths.map(s => `<div class="tidal-line">[${s.id}] ${esc(s.def)}</div>`).join('')
+    : `<div style="color:var(--dim);font-size:10px">${state.nodeTree ? 'アクティブなSynthなし' : 'ノードツリー未取得'}</div>`;
+
+  return `<div class="detail-title">SYNTH — SC エンジン</div>
+    <div class="detail-section">
+      <div class="detail-section-label">ENERGY</div>
+      <div class="energy-bar-wrap">
+        <div class="energy-bar-fill" style="width:${pct}%"></div>
+      </div>
+      <div style="margin-top:4px;color:var(--text2);font-size:10px">${pct}%</div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">ACTIVE SYNTHS</div>
+      ${synthList}
+    </div>
+    <hr class="divider">
+    <div class="detail-section">
+      <div class="btn-group">
+        <button class="btn danger" id="btn-free-all">FREE ALL</button>
+        <button class="btn" id="btn-refresh-tree">ツリー更新</button>
+      </div>
+    </div>`;
+}
+
+function bindSynth() {
+  q('btn-free-all')?.addEventListener('click', () => send('/matoma/sc/free_all', []));
+  q('btn-refresh-tree')?.addEventListener('click', () => send('/matoma/sc/query_tree', []));
+}
+
+// ── OUT detail ────────────────────────────────────────────────────────────
+function detailOut() {
+  const ready = state.scReady;
+  return `<div class="detail-title">OUT — SuperCollider サーバー</div>
+    <div class="detail-section">
+      <div style="font-size:16px;color:${ready?'var(--accent)':'var(--danger)'};margin-bottom:12px">
+        ${ready ? '● SC READY' : '○ SC OFFLINE'}
+      </div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">SERVER</div>
+      <div class="btn-group">
+        <button class="btn primary" id="btn-sc-start">起動</button>
+        <button class="btn danger" id="btn-sc-stop">停止</button>
+        <button class="btn" id="btn-sc-reboot">リブート</button>
+      </div>
+    </div>
+    <hr class="divider">
+    <div class="detail-section">
+      <div class="detail-section-label">THREE LAYER CONTROLLER</div>
+      <div class="btn-group">
+        <button class="btn primary" id="btn-ctrl-start">START</button>
+        <button class="btn danger" id="btn-ctrl-stop">STOP</button>
+      </div>
+    </div>`;
+}
+
+function bindOut() {
+  q('btn-sc-start')?.addEventListener('click',  () => send('/matoma/sc/start',  []));
+  q('btn-sc-stop')?.addEventListener('click',   () => send('/matoma/sc/stop',   []));
+  q('btn-sc-reboot')?.addEventListener('click', () => send('/matoma/sc/reboot', []));
+  q('btn-ctrl-start')?.addEventListener('click',() => send('/matoma/controller/start',[]));
+  q('btn-ctrl-stop')?.addEventListener('click', () => send('/matoma/controller/stop', []));
+}
+
+// ── NODE TREE view ────────────────────────────────────────────────────────
+function updateNodeTreeView() {
+  const container = document.getElementById('tree-container');
+  const status = document.getElementById('tree-status');
+  if (!state.nodeTree) {
+    if (status) status.textContent = 'ノードツリー未取得';
+    if (container) container.innerHTML = '';
+    return;
+  }
+  if (status) status.textContent = '最終更新: ' + new Date().toLocaleTimeString('ja-JP');
+  if (container) container.innerHTML = renderTreeNode(state.nodeTree, 0);
+}
+
+function renderTreeNode(node, depth) {
+  if (!node) return '';
+  const indent = '&nbsp;'.repeat(depth * 4);
+  if (node.type === 'synth') {
+    return `<div class="tree-node">
+      <div class="tree-node-row">
+        ${indent}
+        <span class="tree-type-synth">SYN</span>
+        <span class="tree-id">#${node.id}</span>
+        <span class="tree-def">${esc(node.def)}</span>
+      </div>
+    </div>`;
+  }
+  const kids = (node.children || []).map(c => renderTreeNode(c, depth + 1)).join('');
+  return `<div class="tree-node">
+    <div class="tree-node-row">
+      ${indent}
+      <span class="tree-type-group">GRP</span>
+      <span class="tree-id">#${node.id}</span>
+      <span style="color:var(--dim);font-size:10px">[${(node.children||[]).length}]</span>
+    </div>
+    ${kids}
+  </div>`;
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('view-' + btn.dataset.tab).classList.add('active');
   });
+});
+
+// ── Util ──────────────────────────────────────────────────────────────────
+function setDot(id, cls) {
+  const el = document.getElementById(id);
+  if (el) el.className = 'status-dot ' + cls;
+}
+function setEl(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+function q(id) { return document.getElementById(id); }
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// ── GLITCH SYNTH ──────────────────────────────────────
-const activeGlitchSynths = new Set();
-const GLITCH_SYNTHS = ['gendy', 'chaos', 'burst'];
-
-function glitchSynthToggle(src) {
-  const btn = document.getElementById('btn-glitch-' + src);
-  if (activeGlitchSynths.has(src)) {
-    activeGlitchSynths.delete(src);
-    btn.classList.remove('on');
-    send({ address: '/matoma/glitch/' + src + '/stop', args: [] });
-    addLog('/glitch/' + src, 'stop');
-  } else {
-    activeGlitchSynths.add(src);
-    btn.classList.add('on');
-    send({ address: '/matoma/glitch/' + src + '/start', args: [] });
-    addLog('/glitch/' + src, 'start');
-  }
-}
-
-function glitchSynthParam(src, param, val, vid) {
-  document.getElementById(vid).textContent = val.toFixed(2);
-  send({ address: '/matoma/glitch/' + src + '/param', args: [param, val] });
-}
-
-function glitchAllStop() {
-  GLITCH_SYNTHS.forEach(src => {
-    if (activeGlitchSynths.has(src)) {
-      activeGlitchSynths.delete(src);
-      const btn = document.getElementById('btn-glitch-' + src);
-      if (btn) btn.classList.remove('on');
-      send({ address: '/matoma/glitch/' + src + '/stop', args: [] });
-    }
-  });
-  addLog('/glitch', 'all stop');
-}
-
-// ── GRAN SYNTH ────────────────────────────────────────────
-// GrainSin ベースのバッファ不要グラニュラーシンセ（独立型）
-// OSC: /matoma/gran_synth/start|stop|param
-let granSynthActive = false;
-
-function granSynthToggle() {
-  const btn = document.getElementById('btn-gransyn');
-  granSynthActive = !granSynthActive;
-  if (granSynthActive) {
-    btn.classList.add('on');
-    btn.textContent = 'ON';
-    send({ address: '/matoma/gran_synth/start', args: [] });
-    addLog('/gran_synth', 'start');
-  } else {
-    btn.classList.remove('on');
-    btn.textContent = 'OFF';
-    send({ address: '/matoma/gran_synth/stop', args: [] });
-    addLog('/gran_synth', 'stop');
-  }
-}
-
-// FREQ: スライダー 0-1 → 40-440Hz 対数マッピング（A1〜A4）
-function granSynthFreq(v) {
-  const hz = Math.round(40 * Math.pow(440 / 40, v));
-  document.getElementById('v-gsf').textContent = hz + ' Hz';
-  send({ address: '/matoma/gran_synth/param', args: ['freq', hz] });
-}
-
-// 汎用パラメーター送信（dispVal を省略すると val.toFixed(2) で表示）
-function granSynthParam(param, val, vid, dispVal) {
-  document.getElementById(vid).textContent =
-    dispVal !== undefined ? dispVal : val.toFixed(2);
-  send({ address: '/matoma/gran_synth/param', args: [param, val] });
-}
-
-// ── GRAN SAMPLER ──────────────────────────────────────────
-// GrainBuf ベースのファイル読み込み型グラニュラーサンプラー
-// 手順: FILE SELECT → ロード確認 → ON/OFF
-let granSamplerActive = false;
-
-function granSamplerBrowse() {
-  send({ address: '/matoma/gran_sampler/browse', args: [] });
-}
-
-function granSamplerToggle() {
-  const btn = document.getElementById('btn-gsampler');
-  granSamplerActive = !granSamplerActive;
-  if (granSamplerActive) {
-    btn.classList.add('on');
-    btn.textContent = 'ON';
-    send({ address: '/matoma/gran_sampler/start', args: [] });
-    addLog('/gran_sampler', 'start');
-  } else {
-    btn.classList.remove('on');
-    btn.textContent = 'OFF';
-    send({ address: '/matoma/gran_sampler/stop', args: [] });
-    addLog('/gran_sampler', 'stop');
-  }
-}
-
-function granSamplerParam(param, val, vid, dispVal) {
-  document.getElementById(vid).textContent =
-    dispVal !== undefined ? dispVal : val.toFixed(2);
-  send({ address: '/matoma/gran_sampler/param', args: [param, val] });
-}
-
-// ── STUDIO MODE ──────────────────────────────────────────────────────
-function switchMode(mode) {
-  currentMode = mode;
-  document.getElementById('console').style.display     = mode === 'live'   ? 'grid' : 'none';
-  document.getElementById('studio-view').style.display = mode === 'studio' ? 'flex' : 'none';
-  document.getElementById('tab-live').classList.toggle('active',   mode === 'live');
-  document.getElementById('tab-studio').classList.toggle('active', mode === 'studio');
-  if (mode === 'studio') drawAllSparklines();
-}
-
-// ── SC HEARTBEAT DISPLAY ─────────────────────────────────────────────
-function tickHeartbeatDisplay() {
-  const dot = document.getElementById('sc-hb-dot');
-  const txt = document.getElementById('sc-hb-text');
-  if (!dot || !txt) return;
-  const now = Date.now() / 1000;
-  const age = scHbLastTs > 0 ? (now - scHbLastTs) : Infinity;
-  if (age < 8) {
-    dot.className = 'sc-hb-dot alive';
-    txt.textContent = age.toFixed(1) + '秒前';
-    txt.style.color = 'var(--c-scene)';
-  } else if (age < 20) {
-    dot.className = 'sc-hb-dot stale';
-    txt.textContent = age.toFixed(0) + '秒前（遅延）';
-    txt.style.color = 'var(--c-warn)';
-  } else {
-    dot.className = 'sc-hb-dot dead';
-    txt.textContent = scHbLastTs > 0 ? Math.round(age) + '秒前' : '未受信';
-    txt.style.color = '#f87171';
-  }
-}
-setInterval(tickHeartbeatDisplay, 500);
-
-// ── OSC LOG ──────────────────────────────────────────────────────────
-function addOscLogEntry(msg) {
-  _oscMsgThisSec++;
-  if (currentMode !== 'studio') return;
-  const body = document.getElementById('osc-log-body');
-  if (!body) return;
-  const d   = new Date();
-  const hms = d.toTimeString().slice(0, 8);
-  const ms  = String(d.getMilliseconds()).padStart(3, '0');
-  const argsStr = Array.isArray(msg.args)
-    ? msg.args.map(a => typeof a === 'number' ? a.toFixed(3) : String(a)).join(' ')
-    : '';
-  const el = document.createElement('div');
-  el.className = 'osc-log-entry';
-  el.innerHTML =
-    '<span class="osc-ts">' + hms + '.' + ms + '</span>' +
-    '<span class="osc-addr">' + (msg.address || '?') + '</span>' +
-    '<span class="osc-args">' + argsStr + '</span>';
-  body.insertBefore(el, body.firstChild);
-  if (body.children.length > 80) body.removeChild(body.lastChild);
-}
-setInterval(() => {
-  const rateEl = document.getElementById('osc-log-rate');
-  if (rateEl) rateEl.textContent = 'OSC: ' + _oscMsgThisSec + ' msg/s';
-  _oscMsgThisSec = 0;
-}, 1000);
-
-// ── SPARKLINES ───────────────────────────────────────────────────────
-const SPARKLINE_DEFS = [
-  { section:'studio-drone', key:'drone-freq',     label:'freq',       color:'#60a5fa', min:20, max:200 },
-  { section:'studio-drone', key:'drone-feedback', label:'fbk',        color:'#60a5fa', min:0,  max:0.9 },
-  { section:'studio-drone', key:'drone-room',     label:'room',       color:'#60a5fa', min:0,  max:1   },
-  { section:'studio-gran',  key:'gran-density',   label:'gran/dens',  color:'#fb923c', min:1,  max:80  },
-  { section:'studio-gran',  key:'gran-spray',     label:'gran/spray', color:'#fb923c', min:0,  max:1   },
-  { section:'studio-gran',  key:'gsynth-density', label:'gsynth/den', color:'#f97316', min:1,  max:80  },
-  { section:'studio-gran',  key:'gsynth-bright',  label:'gsynth/brg', color:'#f97316', min:0,  max:1   },
-  { section:'studio-gran',  key:'gsynth-chaos',   label:'gsynth/chs', color:'#f97316', min:0,  max:1   },
-  { section:'studio-gsamp', key:'gsamp-density',  label:'density',    color:'#2dd4bf', min:1,  max:80  },
-  { section:'studio-gsamp', key:'gsamp-spray',    label:'spray',      color:'#2dd4bf', min:0,  max:1   },
-  { section:'studio-gsamp', key:'gsamp-pos',      label:'pos',        color:'#2dd4bf', min:0,  max:1   },
-];
-
-function initSparklines() {
-  SPARKLINE_DEFS.forEach(def => {
-    sparkBuffers[def.key] = { vals: new Array(SPARK_SAMPLES).fill(null), head: 0 };
-    const section = document.getElementById(def.section);
-    if (!section) return;
-    const row = document.createElement('div');
-    row.className = 'spark-row';
-    const lbl = document.createElement('span');
-    lbl.className = 'spark-label';
-    lbl.textContent = def.label;
-    const cv = document.createElement('canvas');
-    cv.id = 'sp-' + def.key;
-    cv.setAttribute('width', '160');
-    cv.setAttribute('height', '20');
-    cv.className = 'sparkline';
-    const val = document.createElement('span');
-    val.id = 'sp-v-' + def.key;
-    val.className = 'spark-val';
-    val.textContent = '—';
-    row.appendChild(lbl);
-    row.appendChild(cv);
-    row.appendChild(val);
-    section.appendChild(row);
-  });
-}
-
-function studioTrackParam(key, value, min, max, fmt) {
-  if (value == null) return;
-  const buf = sparkBuffers[key];
-  if (!buf) return;
-  const norm = Math.max(0, Math.min(1, (value - min) / (max - min)));
-  buf.vals[buf.head] = norm;
-  buf.head = (buf.head + 1) % SPARK_SAMPLES;
-  const spv = document.getElementById('sp-v-' + key);
-  if (spv) spv.textContent = fmt(value);
-}
-
-function drawSparkline(def) {
-  if (currentMode !== 'studio') return;
-  const canvas = document.getElementById('sp-' + def.key);
-  if (!canvas) return;
-  const buf = sparkBuffers[def.key];
-  if (!buf) return;
-  const W = canvas.width, H = canvas.height;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#0d0d12';
-  ctx.fillRect(0, 0, W, H);
-  const vals = [];
-  for (let i = 0; i < SPARK_SAMPLES; i++) {
-    vals.push(buf.vals[(buf.head + i) % SPARK_SAMPLES]);
-  }
-  ctx.beginPath();
-  ctx.strokeStyle = def.color;
-  ctx.lineWidth = 1.5;
-  let started = false;
-  for (let i = 0; i < vals.length; i++) {
-    if (vals[i] == null) continue;
-    const x = (i / (SPARK_SAMPLES - 1)) * (W - 2) + 1;
-    const y = H - 2 - vals[i] * (H - 4);
-    if (!started) { ctx.moveTo(x, y); started = true; }
-    else { ctx.lineTo(x, y); }
-  }
-  if (started) ctx.stroke();
-}
-
-function drawAllSparklines() {
-  SPARKLINE_DEFS.forEach(def => drawSparkline(def));
-}
-
-function updateStudioMarkov(state) {
-  if (!state || !state.state) return;
-  const el = document.getElementById('studio-markov-state');
-  if (el) el.textContent = state.state;
-}
-
-// ── INIT ──────────────────────────────────────────────────
-initSparklines();
-connect();
+// ── Init ──────────────────────────────────────────────────────────────────
+renderDetail('key');
+connectWS();
 </script>
 </body>
 </html>

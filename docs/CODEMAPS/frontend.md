@@ -1,164 +1,132 @@
-<!-- Generated: 2026-04-04 (updated) | Files scanned: frontend/index.html | Token estimate: ~650 -->
+<!-- Generated: 2026-04-11 | Files scanned: frontend/index.html (866行) | 2タブGUI全面刷新 -->
 # Frontend Architecture
 
 ## Stack
 
 - HTML5 + 純JavaScript（フレームワーク不使用）
 - WebSocket: `ws://localhost:8765`
-- 1ファイル構成: `frontend/index.html` (1850行)
+- 1ファイル構成: `frontend/index.html` (866行)
 
-## UI モジュール一覧
-
-| モジュール | 色 | 役割 | 主要送信アドレス |
-|-----------|---|------|----------------|
-| SCENE | #4ade80 緑 | 4プリセット切替 | `/matoma/scene` |
-| DRONE | #60a5fa 青 | ドローン・アンビエント | `/matoma/drone/param` |
-| SYNTH | #fbbf24 オレンジ | FM合成シンセ | `/matoma/param` |
-| GRANULAR | #fb923c 薄橙 | グラニュラーサンプラー（バッファベース） | `/matoma/granular/*` |
-| GRAN SYNTH | #8b7355 (tan) | グラニュラーシンセ（バッファ不要・独立型） | `/matoma/gran_synth/*` |
-| SPECTRAL | #e879f9 マゼンタ | スペクトル処理 | `/matoma/spectral/param` |
-| SEQ | #d4f74c ライム | Turingシーケンサー | `/matoma/seq/*` |
-| CHAOS ENGINE | #a78bfa 紫 | ChaosEngine + MarkovTimescale制御 | `/matoma/chaos/*` `/matoma/markov/*` `/matoma/layer/*` |
-| TIDAL | #22d3ee シアン | Tidal Cycles | `/matoma/tidal/*` |
-| DRUMS | #f43f5e ピンク | ドラムマシン | `/matoma/tidal/drums` |
-
-## CHAOS ENGINE モジュール 詳細
+## UI 構成（2タブ）
 
 ```
-START / STOP ボタン
-読み取り専用モニター:
-  SPEED   — ChaosEngine._speed (進行速度)
-  PROB    — trig_prob (パラメーター変化確率)
-  REPEAT  — dejavu_prob (履歴スナップバック確率)
-
-DRIFT MODEL（モデル選択ラジオボタン）:
-  MIDDLE: BoundedWalk* / Fractal / L-System / Blend
-  LOWER:  Dejavu* / BoundedWalk / L-System / Blend
-  (* = デフォルト)
-
-REPEAT↔CHAOS スライダー:
-  MIDDLE (0=L-System, 1=BoundedWalk)  → /matoma/layer/middle/chaos
-  LOWER  (0=Dejavu,   1=BoundedWalk)  → /matoma/layer/lower/chaos
-
-MARKOV セクション:
-  ▶/■ MARKOV ボタン  → /matoma/markov/start|stop
-  INTERVAL スライダー (10-300s)  → /matoma/markov/interval
-  状態表示: void/sparse/medium/dense/intense + 次まで残り秒数
-
-状態モニター（read-only バー）:
-  DRONE: freq, shimmer, feedback_amt, room, amp
-  GRANULAR: density, spray, pos, room, amp
-  GRAN SYNTH: density, bright, chaos, room, amp
-  GRAN SAMPLER: density, spray, pos, room, amp
+Tab 1: SIGNAL FLOW  — ライブパフォーマンス用（デフォルト表示）
+Tab 2: SC NODE TREE — 開発・デバッグ用
 ```
 
-## DRONE モジュール 詳細
+## SIGNAL FLOW タブ
+
+5ノードパイプライン（クリックで詳細パネル展開）:
 
 ```
-XY Pad: X軸=freq (40-220Hz), Y軸=detune (0-1)
-Sliders:
-  cutoff   (80-3000 Hz)
-  drift    (0-1)     ← LFO速度
-  room     (0-1)     ← リバーブ量
-  revtime  (1-30s)   ← リバーブ残響時間
-  amp      (0-1)
-  breathe  (0-1)     ← 振幅変調の深さ
+KEY → HARMONY → RHYTHM → SYNTH → OUT
+
+各ノード:
+  KEY     — スケール・ルート表示 (flow_state受信で更新)
+  HARMONY — コード進行・モード表示 (flow_state受信で更新)
+  RHYTHM  — Tidalプリセット・BPM表示 + Markov状態ボタン (5状態)
+  SYNTH   — SCエンジン制御 (free_all / refresh_tree)
+  OUT     — マスター音量スライダー
 ```
 
-## GRANULAR モジュール 詳細
+### 詳細パネル（各ノードクリック時に展開）
 
 ```
-Parameters (バッファベース):
-  pos     (0-1)      再生位置
-  density (1-50)     グレイン/秒
-  spread  (0-1)      ピッチばらつき
-  amp     (0-1)      音量
-Buffer Load ボタン
+KEY パネル:
+  状態表示: root / scale / mode
+  UpperLayer 遷移ボタン: void / sparse / medium / dense / intense
+    → /matoma/markov/set_state (controller._upper.force_state で即時適用)
+
+HARMONY パネル:
+  状態表示: chord / degree
+  Markov遷移方向ボタン (UpperLayer 状態誘導)
+
+RHYTHM パネル:
+  Tidalプリセット表示
+  BPM表示
+  次の Markov 遷移までの残り秒数
+
+SYNTH パネル:
+  [FREE ALL]    → /matoma/sc/free_all → scsynth /g_freeAll [0]
+  [REFRESH TREE] → /matoma/sc/query_tree → scsynth /g_queryTree [0,0]
+
+OUT パネル:
+  マスター音量スライダー → /matoma/master/amp
 ```
 
-## GRAN SYNTH モジュール 詳細
+## SC NODE TREE タブ
 
 ```
-Start / Stop ボタン
-Parameters (バッファ不要・GrainSin):
-  freq      (40-220 Hz)   基本周波数（Hz）
-  density   (5-60)        グレイン/秒
-  grainDur  (0.05-0.5s)   グレイン長
-  spread    (0-1.0)       ピッチ散乱
-  panSpread (0-1.0)       ステレオ広がり
-  bright    (0-1.0)       オクターブ上層量
-  chaos     (0-1.0)       有機モジュレーション深さ
-  room      (0-1.0)       リバーブ量
-  amp       (0-1.0)       音量
-```
+6秒ごとに /g_queryTree を scsynth (port 57110) へ送信
+← /g_queryTree.reply → _parse_node_tree() → broadcast("sc_node_tree")
+← WS受信 → renderTree() → Group/Synth 階層ツリーをHTML表示
 
-## SEQ モジュール 詳細
-
-```
-16ステップグリッド (ON/OFF 視覚フィードバック付き)
-BPM: 20-300
-Step Div: 1/4 / 1/8 / 1/16 / 1/32
-TRIG Prob: 0-1
-Mutation Prob: 0-1
-Active Params: drone_cutoff / drone_drift / spectral_smear / spectral_chaos
-```
-
-## TIDAL モジュール 詳細
-
-```
-Start / Stop / Hush
-Tempo (BPM)
-Root: C / C# / D / ... / B
-Scale: major / minor / dorian / phrygian / lydian / ...
-Chord: major7 / minor7 / sus4 / ...
-Synth: 各種SuperCollider SynthDef
-Octave: 1-6
-Pattern Buttons: Chord / Scale / Arp / Drums
+ヘッダー:
+  SC STATUS バッジ (connected/disconnected)
+  [START] → /matoma/sc/start
+  [STOP]  → /matoma/sc/stop
+  [REBOOT] → /matoma/sc/reboot
 ```
 
 ## JavaScript 主要関数
 
-```
-connect()                  — WebSocket接続・再接続
-send(msg)                  — OSCメッセージ送信 ({address, args})
-onMessage(event)           — WS受信ディスパッチ
-selectScene(name)          — シーン切替 + UI更新
-onSeqTick(msg)             — シーケンサーステップ表示更新
-updateDensityDots(n)       — グレイン密度表示
-chaosToggle()              — ChaosEngine ON/OFF
-markovToggle()             — MarkovTimescale ON/OFF
-setMarkovRunning(bool)     — Markovボタン表示更新
-updateMarkovState(state)   — Markovステータス表示更新 (state/remaining/interval)
-updateChaosState(state)    — ChaosEngineバー更新
+```javascript
+// 接続・通信
+connect()              — WebSocket接続・再接続（3秒リトライ）
+send(address, args)    — OSCメッセージ送信 ({address, args})
+onMessage(event)       — WS受信ディスパッチ
+
+// ノードクリック → パネル切替
+openPanel(nodeId)      — 詳細パネル展開・switch(nodeId)でdetailXxx()呼び出し
+
+// 詳細パネル生成
+detailKey()            — KEY パネルHTML生成
+detailHarmony()        — HARMONY パネルHTML生成
+detailRhythm()         — RHYTHM パネルHTML生成
+detailSynth()          — SYNTH パネルHTML生成 (btn-free-all, btn-refresh-tree)
+detailOut()            — OUT パネルHTML生成
+
+// イベントバインド（パネル生成後に呼ぶ）
+bindKey()              — UpperLayer状態ボタン → /matoma/markov/set_state
+bindHarmony()          — Markov方向ボタン
+bindRhythm()           — Tidalプリセット・BPM
+bindSynth()            — btn-free-all → /matoma/sc/free_all
+                         btn-refresh-tree → /matoma/sc/query_tree
+bindOut()              — マスター音量スライダー
+
+// 表示更新
+updateFlowState(msg)   — flow_state受信 → KEY/HARMONY/RHYTHM ノード表示更新
+updateMarkovState(msg) — markov_state受信 → 状態バッジ・残り秒数更新
+renderTree(nodes)      — sc_node_tree受信 → Group/Synth ツリーHTML生成
+updateSCStatus(ready)  — SC STATUS バッジ更新
 ```
 
 ## WebSocket メッセージ受信タイプ
 
 ```
-sc_ready          → SC起動完了通知
-seq_tick          → シーケンサーステップ更新
-granular_density  → グレイン密度表示更新
-chaos_state       → CHAOS ENGINEバー一括更新
-markov_state      → Markov状態・残り時間更新
+flow_state      → {"type":"flow_state", "key":{root,scale,mode}, "harmony":{chord,degree}, "rhythm":{preset,bpm}}
+                  → updateFlowState() → KEY/HARMONY/RHYTHM ノード表示更新
+markov_state    → {"type":"markov_state", "state":{name,remaining,interval,...}}
+                  → updateMarkovState() → Markov状態バッジ・残り秒数更新
+sc_node_tree    → {"type":"sc_node_tree", "nodes":[...]}
+                  → renderTree() → SC NODE TREE タブ更新
+sc_ready        → {"type":"sc_ready"} → updateSCStatus(true)
+sc_status       → {"type":"sc_status", "ready":bool} → updateSCStatus(bool)
+sc_booting      → {"type":"sc_booting", "message":"..."} → 起動中メッセージ表示
+chaos_state     → {"type":"chaos_state", "state":{...}} → モニター更新（必要時）
 ```
 
 ## State Flow
 
 ```
-ユーザー操作 (スライダー/ボタン)
-  → send({address, args})
+ユーザー操作 (ノードクリック → 状態ボタン / スライダー)
+  → send(address, args)
   → ws.send(JSON)
   → [bridge.py]
-  → SC or TidalController or ChaosEngine or MarkovTimescale
+  → ThreeLayerController or sc_synth_client
 
-SC/Python フィードバック
+Python フィードバック
   → bridge.py: broadcast()
   → ws.onmessage → onMessage()
-  → 各 updateXxx() → UI更新
-```
-
-## キーボードショートカット
-
-```
-1-4  → シーン選択 (暗い/標準/明るい/高音・静か)
+  → updateFlowState() / updateMarkovState() / renderTree() → UI更新
 ```

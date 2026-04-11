@@ -167,3 +167,166 @@ def test_scene_to_osc_messages_rhythmic():
     assert len(rhythmic_msgs) == 1
     assert rhythmic_msgs[0]["args"][0] == "prob"
     assert rhythmic_msgs[0]["args"][1] == 0.3
+
+
+def test_scene_to_osc_messages_organic_coupling():
+    """organic_coupling フィールドがOSCメッセージに変換されるか。"""
+    from backend.scenes import scene_to_osc_messages
+    scene = {
+        "name": "テスト",
+        "drone": {},
+        "granular": {},
+        "rhythmic": {},
+        "organic_coupling": 0.75,
+    }
+    messages = scene_to_osc_messages(scene)
+    coupling_msgs = [m for m in messages if m["address"] == "/matoma/coupling"]
+    assert len(coupling_msgs) == 1
+    assert coupling_msgs[0]["args"][0] == pytest.approx(0.75)
+
+
+def test_scene_to_osc_messages_layers_granular_start():
+    """layers.granular=True で /matoma/granular/start が送られるか。"""
+    from backend.scenes import scene_to_osc_messages
+    scene = {
+        "name": "テスト",
+        "drone": {},
+        "granular": {},
+        "rhythmic": {},
+        "layers": {"granular": True},
+    }
+    messages = scene_to_osc_messages(scene)
+    addresses = [m["address"] for m in messages]
+    assert "/matoma/granular/start" in addresses
+    assert "/matoma/granular/stop" not in addresses
+
+
+def test_scene_to_osc_messages_layers_granular_stop():
+    """layers.granular=False で /matoma/granular/stop が送られるか。"""
+    from backend.scenes import scene_to_osc_messages
+    scene = {
+        "name": "テスト",
+        "drone": {},
+        "granular": {},
+        "rhythmic": {},
+        "layers": {"granular": False},
+    }
+    messages = scene_to_osc_messages(scene)
+    addresses = [m["address"] for m in messages]
+    assert "/matoma/granular/stop" in addresses
+    assert "/matoma/granular/start" not in addresses
+
+
+def test_scene_to_osc_messages_layers_turing_start():
+    """layers.turing=True で /matoma/rhythmic/start が送られるか。"""
+    from backend.scenes import scene_to_osc_messages
+    scene = {
+        "name": "テスト",
+        "drone": {},
+        "granular": {},
+        "rhythmic": {},
+        "layers": {"turing": True},
+    }
+    messages = scene_to_osc_messages(scene)
+    addresses = [m["address"] for m in messages]
+    assert "/matoma/rhythmic/start" in addresses
+
+
+def test_scene_to_osc_messages_layers_turing_stop():
+    """layers.turing=False で /matoma/rhythmic/stop が送られるか。"""
+    from backend.scenes import scene_to_osc_messages
+    scene = {
+        "name": "テスト",
+        "drone": {},
+        "granular": {},
+        "rhythmic": {},
+        "layers": {"turing": False},
+    }
+    messages = scene_to_osc_messages(scene)
+    addresses = [m["address"] for m in messages]
+    assert "/matoma/rhythmic/stop" in addresses
+
+
+def test_scene_to_osc_messages_layers_spectral_start():
+    """layers.spectral=True で spectralパラメーターと /matoma/spectral/start が送られるか。"""
+    from backend.scenes import scene_to_osc_messages
+    scene = {
+        "name": "テスト",
+        "drone": {},
+        "granular": {},
+        "rhythmic": {},
+        "spectral": {"mix": 0.5},
+        "layers": {"spectral": True},
+    }
+    messages = scene_to_osc_messages(scene)
+    addresses = [m["address"] for m in messages]
+    assert "/matoma/spectral/start" in addresses
+    assert "/matoma/spectral/param" in addresses
+
+
+def test_scene_to_osc_messages_layers_spectral_stop():
+    """layers.spectral=False で /matoma/spectral/stop が送られるか。"""
+    from backend.scenes import scene_to_osc_messages
+    scene = {
+        "name": "テスト",
+        "drone": {},
+        "granular": {},
+        "rhythmic": {},
+        "layers": {"spectral": False},
+    }
+    messages = scene_to_osc_messages(scene)
+    addresses = [m["address"] for m in messages]
+    assert "/matoma/spectral/stop" in addresses
+
+
+# ── load_scenes エラーハンドリング ─────────────────────────────────────────────
+
+def test_load_scenes_file_not_found(tmp_path, monkeypatch):
+    """scenes.json が存在しないときに空リストを返すか。"""
+    import backend.scenes as scenes_mod
+    # キャッシュをリセット
+    original_cache = scenes_mod._SCENES_CACHE
+    scenes_mod._SCENES_CACHE = None
+
+    monkeypatch.setattr(scenes_mod, "SCENES_FILE", tmp_path / "nonexistent.json")
+    result = scenes_mod.load_scenes()
+    assert result == []
+
+    # キャッシュを元に戻す
+    scenes_mod._SCENES_CACHE = original_cache
+
+
+def test_load_scenes_invalid_json(tmp_path, monkeypatch):
+    """scenes.json が壊れているときに空リストを返すか。"""
+    import backend.scenes as scenes_mod
+    original_cache = scenes_mod._SCENES_CACHE
+    scenes_mod._SCENES_CACHE = None
+
+    bad_file = tmp_path / "scenes.json"
+    bad_file.write_text("{ invalid json !!!")
+    monkeypatch.setattr(scenes_mod, "SCENES_FILE", bad_file)
+    result = scenes_mod.load_scenes()
+    assert result == []
+
+    scenes_mod._SCENES_CACHE = original_cache
+
+
+def test_load_scenes_uses_cache():
+    """2回目の呼び出しはキャッシュを返すか（I/Oなし）。"""
+    import backend.scenes as scenes_mod
+    first = scenes_mod.load_scenes()
+    second = scenes_mod.load_scenes()
+    assert first is second
+
+
+def test_get_scene_by_id():
+    """英語id（例: "void"）でシーンを取得できるか。"""
+    from backend.scenes import get_scene, load_scenes
+    scenes = load_scenes()
+    # idフィールドを持つシーンが存在すれば確認する
+    scenes_with_id = [s for s in scenes if "id" in s]
+    if scenes_with_id:
+        scene_id = scenes_with_id[0]["id"]
+        result = get_scene(scene_id)
+        assert result is not None
+        assert result["id"] == scene_id

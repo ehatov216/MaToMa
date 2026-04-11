@@ -127,6 +127,135 @@ s.waitForBoot({
         ~centroidBus, ~couplingBus).postln;
 
     // ══════════════════════════════════════════════════════════════
+    // ■ 共通スケール制約 — 全音源が同じスケールを共有する
+    //
+    //   ~scalePresets : スケール名 → 半音オフセット配列
+    //   ~currentScale : 現在アクティブな半音オフセット配列
+    //   ~currentScaleRoot : ルート周波数 (Hz)
+    //   ~scaleBuf     : 3オクターブ分のスケール周波数をもつBuffer
+    //   ~buildScaleBuf : スケール変更時にBufferを再構築する関数
+    //
+    ~scalePresets = Dictionary[
+        \minor_pentatonic -> [0, 3, 5, 7, 10],
+        \dorian           -> [0, 2, 3, 5, 7, 9, 10],
+        \phrygian         -> [0, 1, 3, 5, 7, 8, 10],
+        \whole_tone       -> [0, 2, 4, 6, 8, 10],
+        \chromatic        -> (0..11)
+    ];
+    ~currentScaleName = \minor_pentatonic;
+    ~currentScaleRoot = 41.0;  // Hz（デフォルトは深淵シーンのドローン基音）
+    ~currentScale     = ~scalePresets[\minor_pentatonic];
+    ~scaleBuf         = nil;
+
+    ~buildScaleBuf = {
+        var freqs = [];
+        3.do({ |oct|
+            ~currentScale.do({ |deg|
+                freqs = freqs ++ [~currentScaleRoot * (2 ** ((deg + (oct * 12)) / 12.0))];
+            });
+        });
+        if (~scaleBuf.notNil) { ~scaleBuf.free };
+        ~scaleBuf = Buffer.loadCollection(s, freqs);
+        "スケールバッファ更新: % (root:% Hz, %音)".format(
+            ~currentScaleName, ~currentScaleRoot.round(0.1), freqs.size).postln;
+    };
+    ~buildScaleBuf.();
+
+    // ══════════════════════════════════════════════════════════════
+    // ■ コードプログレッション（上位レイヤー：長期調性移動）
+    //
+    //   設計:
+    //     ~chordProgressions : シーンごとのコード進行（半音オフセット配列）
+    //     各要素は [scaleName, semitoneOffset] のペア
+    //     semitoneOffset は ~currentScaleRoot (シーン基音) からの半音数
+    //
+    //   動作:
+    //     4〜8小節ごとに ~currentScaleRoot が進行表に従って移動する
+    //     全音源（Turing Machine、Glitch Burst）が自動で新しいルートに追従
+    //     ~buildScaleBuf.() を呼ぶだけで全音源が更新される
+    //
+    //   参考: design_multiscale_generation.md § 階層レイヤー設計
+    //         上位（マルコフ）: 調性・スケール（64拍単位）
+    //         これはジャズのコード進行と同じ原理
+    // ══════════════════════════════════════════════════════════════
+    ~chordProgressions = Dictionary[
+        \void -> [
+            [\minor_pentatonic, 0],   // i  (深淵・基音)
+            [\minor_pentatonic, 7],   // v  (浮遊・上昇)
+            [\minor_pentatonic, 10],  // VII(緊張)
+            [\minor_pentatonic, 5]    // iv (帰還)
+        ],
+        \warm -> [
+            [\dorian, 0],   // i
+            [\dorian, 5],   // iv
+            [\dorian, 7],   // v
+            [\dorian, 3]    // III
+        ],
+        \vast -> [
+            [\whole_tone, 0],  // 全音音階ステップ1
+            [\whole_tone, 6],  // 全音音階ステップ4（三全音）
+            [\whole_tone, 2],  // 全音音階ステップ2
+            [\whole_tone, 8]   // 全音音階ステップ5
+        ],
+        \lost -> [
+            [\phrygian, 0],   // i
+            [\phrygian, 1],   // II（フリジアンの特徴的和音）
+            [\phrygian, 8],   // VI
+            [\phrygian, 5]    // iv
+        ]
+    ];
+    ~chordProgScene    = \void;      // 現在のシーン
+    ~chordProgIndex    = 0;          // 現在のコードインデックス
+    ~chordProgBars     = 4;          // 1コードあたりの小節数
+    ~chordBaseRoot     = 41.0;       // シーン切り替え時に更新されるベース基音
+    ~chordProgRoutine  = nil;
+    ~turingBpm         = 120.0;      // デフォルトBPM（既存変数を参照）
+
+    // コード進行1ステップ実行
+    ~advanceChord = {
+        var prog = ~chordProgressions.at(~chordProgScene);
+        if (prog.notNil) {
+            var entry     = prog[~chordProgIndex];
+            var scaleName = entry[0];
+            var semitones = entry[1];
+            var newRoot   = ~chordBaseRoot * (2 ** (semitones / 12.0));
+
+            ~currentScaleName = scaleName;
+            ~currentScale     = ~scalePresets[scaleName];
+            ~currentScaleRoot = newRoot;
+            ~buildScaleBuf.();
+
+            // glitch_burst が動いていれば即時更新
+            if (~glitchBurstSynth.notNil) {
+                ~glitchBurstSynth.set(
+                    \scaleBuf,      ~scaleBuf.bufnum,
+                    \numScaleFreqs, ~scaleBuf.numFrames
+                );
+            };
+
+            ~chordProgIndex = (~chordProgIndex + 1) % prog.size;
+            "コード進行: % semitone=% (root: % Hz)".format(
+                scaleName, semitones, newRoot.round(0.1)).postln;
+        };
+    };
+
+    // コード進行ルーティン起動
+    ~startChordProg = {
+        if (~chordProgRoutine.notNil) { ~chordProgRoutine.stop; };
+        ~chordProgIndex = 0;
+        ~advanceChord.();  // 即座に最初のコードへ
+        ~chordProgRoutine = Routine({
+            loop {
+                var barDur = 4 * (60.0 / ~turingBpm);  // 1小節 = 4拍
+                (~chordProgBars * barDur).wait;
+                ~advanceChord.();
+            }
+        }).play;
+        "コード進行 開始 (シーン: %, %小節/コード)".format(
+            ~chordProgScene, ~chordProgBars).postln;
+    };
+
+    // ══════════════════════════════════════════════════════════════
     // ■ STEP 2: DRONE v3 — 自己組織化フィードバックネットワーク型
     //
     //   設計:
@@ -276,6 +405,69 @@ s.waitForBoot({
     ~currentDrone = nil;
 
     // OSCdef: Drone 開始
+    // ══════════════════════════════════════════════════════════════
+    // ■ ~harm — グローバル調性状態（全シンセの共通キー情報）
+    //
+    //   設計思想:
+    //     ドローン＝トーナルセンター（地面）  → ~harm.rootHz を参照
+    //     メロディ/リズム（Tidal/SC）= イベント → 同じ root/mode を前提に degree で動く
+    //
+    //   更新タイミング:
+    //     Python MusicGenerator の Layer1 (スケール変更) / Layer2 (コード度数変更) → OSC
+    //
+    //   参照する音源:
+    //     ~currentDrone   → .set(\freq, ~harm[\degreeHz])
+    //     ~currentGranSynth → .set(\freq, ~harm[\degreeHz])
+    //
+    //   音程設計:
+    //     rootHz   : Cマイナーのルート = C2 = 65.41Hz（ドローン基音オクターブ）
+    //     degreeHz : コード度数のルート音（Im=rootHz, IVm=rootHz×4/3 等）
+    // ══════════════════════════════════════════════════════════════
+    ~harm = Dictionary.new;
+    ~harm[\root]     = "C";
+    ~harm[\mode]     = "minor";
+    ~harm[\degree]   = "I";
+    ~harm[\rootHz]   = 65.41;
+    ~harm[\degreeHz] = 65.41;
+
+    // /matoma/harm/update — Python MusicGenerator からのキー情報更新
+    // args: [root_str, mode_str, rootHz, degree_str, degreeHz]
+    // 例: ["/matoma/harm/update", "C", "minor", 65.41, "IV", 87.31]
+    OSCdef(\matoma_harm_update, { |msg|
+        // OSCスレッドで値を取り出してから .defer でメインスレッドへ渡す
+        var root     = msg[1].asString;
+        var mode     = msg[2].asString;
+        var rootHz   = msg[3].asFloat;
+        var degree   = msg[4].asString;
+        var degreeHz = msg[5].asFloat;
+        {
+            ~harm[\root]     = root;
+            ~harm[\mode]     = mode;
+            ~harm[\rootHz]   = rootHz;
+            ~harm[\degree]   = degree;
+            ~harm[\degreeHz] = degreeHz;
+
+            // ── ドローン追従 ──────────────────────────────────────────
+            if (~currentDrone.notNil) {
+                ~currentDrone.set(\freq, degreeHz);
+                "~harm → drone freq: % Hz (% % %)".format(
+                    degreeHz.round(0.1), root, mode, degree).postln;
+            };
+
+            // ── グラニュラーシンセ追従（1オクターブ上）─────────────────
+            if (~currentGranSynth.notNil) {
+                ~currentGranSynth.set(\freq, degreeHz * 2.0);
+                "~harm → gran_synth freq: % Hz".format(
+                    (degreeHz * 2.0).round(0.1)).postln;
+            };
+
+            // ── 既存スケールバッファ更新 ─────────────────────────────
+            ~currentScaleRoot = rootHz;
+            ~buildScaleBuf.();
+
+        }.defer;
+    }, '/matoma/harm/update', nil, 57200);
+
     OSCdef(\matoma_drone_start, { |msg|
         {
             if (~currentDrone.notNil) {
@@ -995,9 +1187,9 @@ s.waitForBoot({
     s.sync;
     "リズム用バッファ生成完了 (bufnum: %)".format(~rhythmicBuf.bufnum).postln;
 
-    // 音源 1: Granular 打撃音
+    // 音源 1: Granular 打撃音（池田亮司的ドライサウンド）
     SynthDef(\matoma_rhythmic_grain, {
-        arg buf = 0, freq = 440, amp = 0.5,
+        arg buf = 0, freq = 440, amp = 0.45,
             pos = 0.1, size = 0.05, spray = 0.2, outBus = 0;
 
         var trig, sig, env;
@@ -1012,95 +1204,130 @@ s.waitForBoot({
             pos + LFNoise0.kr(4).bipolar(0.05),
             2, LFNoise1.kr(2).range(-0.5, 0.5), -1);
 
-        sig = FreeVerb2.ar(sig[0], sig[1], mix: 0.2, room: 0.35, damp: 0.8);
-        env = EnvGen.ar(Env.perc(0.001, 0.4), doneAction: 2);
+        // 極薄リバーブに変更（池田亮司的ドライサウンド）
+        sig = FreeVerb2.ar(sig[0], sig[1], mix: 0.08, room: 0.2, damp: 0.9);
+        env = EnvGen.ar(Env.perc(0.001, 0.3), doneAction: 2);
         Out.ar(outBus, [sig[0], sig[1]] * env * amp);
     }).add;
 
-    // 音源 2: Klank 金属共鳴（Alva Noto 的なガラス的グリッド音）
+    // 音源 2: DynKlank 金属共鳴（池田亮司的精密倍音制御）
     SynthDef(\matoma_rhythmic_klank, {
-        arg freq = 440, amp = 0.4, decay = 1.2, outBus = 0;
+        arg freq = 440, amp = 0.4, decay = 0.8, outBus = 0;
 
-        var imp, sig, sig2, env;
+        var imp, freqs, amps, rings, sig, env;
 
         imp = Impulse.ar(0) * amp;
 
-        sig = Klank.ar(`[
-            [freq, freq * 2.756, freq * 5.404, freq * 8.933, freq * 13.34],
-            [1.0, 0.5, 0.3, 0.15, 0.07],
-            [decay, decay * 0.7, decay * 0.5, decay * 0.35, decay * 0.2]
-        ], imp);
+        // DynKlank: 倍音比を非整数にして金属的な不協和音に
+        freqs = [freq, freq * 2.756, freq * 5.404, freq * 8.933, freq * 13.34];
+        amps  = [1.0, 0.45, 0.25, 0.12, 0.05];
+        rings = [decay, decay * 0.65, decay * 0.45, decay * 0.3, decay * 0.18];
 
-        sig2 = Klank.ar(`[
-            [freq * 1.001, freq * 2.758, freq * 5.407],
-            [0.9, 0.45, 0.27],
-            [decay * 1.05, decay * 0.72, decay * 0.52]
-        ], imp);
+        sig = DynKlank.ar(`[freqs, amps, rings], imp);
+        env = EnvGen.ar(Env.perc(0.0001, decay * 1.2), doneAction: 2);
 
-        sig = FreeVerb2.ar(sig, sig2, mix: 0.25, room: 0.4, damp: 0.7);
-        env = EnvGen.ar(Env.perc(0.001, decay * 1.5), doneAction: 2);
-        Out.ar(outBus, [sig[0], sig[1]] * env);
+        // 極薄リバーブ（池田亮司：残響は最小限）
+        sig = FreeVerb.ar(sig, mix: 0.06, room: 0.2, damp: 0.9);
+        Out.ar(outBus, [sig, sig * 0.97] * env);
     }).add;
 
-    // 音源 3: FM Percussion（Autechre 的な予測不能な金属打撃音）
+    // 音源 3: 純粋サイン波 FM（池田亮司的精密デジタル音色）
     SynthDef(\matoma_rhythmic_fm, {
         arg freq = 220, amp = 0.45,
-            iScale = 6.0, atk = 0.003, rel = 0.6, mRatio = 2.1, outBus = 0;
+            iScale = 5.0, atk = 0.001, rel = 0.35, mRatio = 2.756, outBus = 0;
 
         var iEnv, env, mod, car, sig;
 
-        iEnv = EnvGen.kr(Env([5.0, 5.0 * iScale, 0.3], [atk, rel], [-2, -4]));
-        env  = EnvGen.ar(Env.perc(atk, rel, curve: [-2, -6]), doneAction: 2);
+        // 変調指数エンベロープ（鋭い立ち上がり → 急減衰）
+        iEnv = EnvGen.kr(Env([iScale * 3.0, iScale, 0.0], [atk, rel], [-4, -6]));
+        env  = EnvGen.ar(Env.perc(atk, rel, curve: [-2, -8]), doneAction: 2);
 
-        mod = SinOsc.ar(freq * mRatio, mul: freq * mRatio * iEnv);
+        mod = SinOsc.ar(freq * mRatio) * (freq * mRatio * iEnv);
         car = SinOsc.ar(freq + mod) * env * amp;
-        car = car + DelayC.ar(car, 0.03, LFNoise1.kr(Rand(5, 10), 0.008, 0.012));
 
-        sig = FreeVerb2.ar(car, car * 0.95, mix: 0.2, room: 0.3, damp: 0.75);
-        Out.ar(outBus, [sig[0], sig[1]]);
+        // LeakDC → tanh サチュレーション（極薄）
+        sig = LeakDC.ar(car);
+        sig = (sig * 1.1).tanh;
+        Out.ar(outBus, [sig, sig * 0.96]);
     }).add;
 
-    // 音源 4: Spring + Ringz（有機的・金属的共鳴）
+    // 音源 4: Ringz 精密共鳴（Alva Noto的金属クリック）
     SynthDef(\matoma_rhythmic_spring, {
-        arg freq = 330, amp = 0.35,
-            spring_const = 60.0, damp = 0.3, outBus = 0;
+        arg freq = 330, amp = 0.35, outBus = 0;
 
-        var exc, sig, env;
+        var imp, sig, env;
 
-        exc = Impulse.ar(0) + (WhiteNoise.ar(0.04) * EnvGen.ar(Env.perc(0.001, 0.04)));
-        sig = Spring.ar(exc, spring_const, damp);
-        sig = sig + Ringz.ar(exc, freq, 1.2, 0.5);
-        sig = RLPF.ar(sig, freq * 4.5, 0.4);
-        sig = FreeVerb2.ar(sig, DelayN.ar(sig, 0.03, 0.013),
-            mix: 0.35, room: 0.55, damp: 0.5);
-
-        env = EnvGen.ar(Env.perc(0.001, 2.0), doneAction: 2);
-        Out.ar(outBus, [sig[0], sig[1]] * env * amp);
+        // 単発インパルス → 複数の Ringz で金属共鳴
+        imp = Impulse.ar(0);
+        sig = Mix.ar([
+            Ringz.ar(imp, freq,        0.9,  1.0),
+            Ringz.ar(imp, freq * 1.414, 0.55, 0.4),  // √2 倍（非整数倍音）
+            Ringz.ar(imp, freq * 2.296, 0.3,  0.2)
+        ]);
+        sig = HPF.ar(sig, 60);
+        sig = LeakDC.ar(sig);
+        env = EnvGen.ar(Env.perc(0.0001, 1.5), doneAction: 2);
+        sig = sig * env * amp;
+        Out.ar(outBus, [sig, sig * 0.98]);
     }).add;
 
-    // 音源 5: Chaos（LFNoise2 + SinOsc + Decimator）
+    // 音源 5: デジタルグリッチクリック（池田亮司的ビットクラッシュ）
     SynthDef(\matoma_rhythmic_chaos, {
         arg freq = 150, amp = 0.3, chaos = 0.7, outBus = 0;
 
         var src, sig, env;
 
-        src = LFNoise2.ar(freq * chaos.linlin(0, 1, 1, 12))
-            * SinOsc.ar(freq * LFNoise1.kr(chaos * 2).range(0.5, 2.0))
-            * chaos.linlin(0, 1, 0.5, 1.5);
+        // サイン波 × サイン波 → リング変調的なクリック
+        src = SinOsc.ar(freq) * SinOsc.ar(freq * chaos.linlin(0, 1, 0.5, 4.0));
+        src = src * EnvGen.ar(Env.perc(0.0001, 0.08), doneAction: Done.none);
 
-        sig = HPF.ar(src, 80);
-        sig = Decimator.ar(sig,
-            s.sampleRate * chaos.linlin(0, 1, 1.0, 0.25),
-            chaos.linlin(0, 1, 16, 8).round.asInteger);
-        sig = sig.softclip;
-        sig = FreeVerb2.ar(sig, sig * 0.9, mix: 0.15, room: 0.3, damp: 0.85);
+        // Decimator でビットクラッシュ（池田亮司的デジタルザラつき）
+        sig = Decimator.ar(src,
+            s.sampleRate * chaos.linlin(0, 1, 1.0, 0.125),
+            chaos.linlin(0, 1, 16, 6).round
+        );
+        sig = sig.tanh;
 
-        env = EnvGen.ar(Env.perc(0.002, 0.5), doneAction: 2);
-        Out.ar(outBus, [sig[0], sig[1]] * env * amp);
+        env = EnvGen.ar(Env.perc(0.0001, 0.18 + (chaos * 0.25)), doneAction: 2);
+        Out.ar(outBus, [sig, sig * 0.97] * env * amp);
+    }).add;
+
+    // 音源 6: matoma_pad — メロディックエンジン（Tidalから和声音符を受信するパッド）
+    // サンプルから変えた点: sa_sub_pad 5声→3声に軽量化、Env.adsr→Env.linen（ベル型）、outBus引数追加
+    SynthDef(\matoma_pad, {
+        arg freq = 220, amp = 0.25, buf = 0, outBus = 0;
+        var sigs, sig, env;
+
+        // 3声デチューンSaw（ユニゾン広がり）
+        sigs = [
+            Saw.ar(freq * 1.006),
+            Saw.ar(freq),
+            Saw.ar(freq * 0.994)
+        ];
+        sig = Mix(sigs) * 0.33;
+
+        // ウォームなフィルター：カットオフをゆっくり揺らす
+        sig = RLPF.ar(sig,
+            (freq * 3.5).clip(500, 5000) * LFNoise1.kr(0.11).range(0.88, 1.12),
+            0.55);
+
+        // ステレオコーラス感（微小ディレイ×2）
+        sig = [
+            sig + DelayC.ar(sig, 0.05, LFNoise1.kr(0.29).range(0.006, 0.018)) * 0.3,
+            sig + DelayC.ar(sig, 0.05, LFNoise1.kr(0.31).range(0.009, 0.022)) * 0.3
+        ];
+
+        // リバーブ（Burial霧感）
+        sig = FreeVerb2.ar(sig[0], sig[1], mix: 0.38, room: 0.60, damp: 0.50);
+
+        // パッドエンベロープ：ゆっくり立ち上がり→フェードアウト
+        env = EnvGen.ar(Env.linen(1.2, 2.0, 2.5, 1.0, \sine), doneAction: 2);
+
+        Out.ar(outBus, sig * env * amp);
     }).add;
 
     s.sync;
-    "SynthDef定義完了: リズム音源 5種".postln;
+    "SynthDef定義完了: リズム音源 5種 + matoma_pad".postln;
 
     // Turing Machine の状態
     ~turingRegister = Array.fill(16, { [0, 1].choose });
@@ -1113,7 +1340,8 @@ s.waitForBoot({
     ~rhythmicSynths = [\matoma_rhythmic_grain, \matoma_rhythmic_klank,
                        \matoma_rhythmic_fm, \matoma_rhythmic_spring,
                        \matoma_rhythmic_chaos];
-    ~rhythmicScale  = [0, 3, 5, 7, 10, 12, 15, 17];  // マイナーペンタトニック拡張
+    // ※ ~rhythmicScale は ~currentScale に統合（後方互換のためコメントで残す）
+    // ~rhythmicScale = [0, 3, 5, 7, 10, 12, 15, 17];
 
     // Turing Machine シフトレジスタ更新関数
     ~turingAdvance = {
@@ -1124,7 +1352,7 @@ s.waitForBoot({
         (
             synthIdx: (~turingRegister[0] * 2 + ~turingRegister[1]) % ~rhythmicSynths.size,
             scaleIdx: (~turingRegister[2] * 4 + ~turingRegister[3] * 2 +
-                       ~turingRegister[4]) % ~rhythmicScale.size
+                       ~turingRegister[4]) % ~currentScale.size
         )
     };
 
@@ -1135,8 +1363,8 @@ s.waitForBoot({
             loop {
                 var result   = ~turingAdvance.();
                 var synthSym = ~rhythmicSynths[result[\synthIdx]];
-                var scaleDeg = ~rhythmicScale[result[\scaleIdx]];
-                var freq     = 220.0 * (2 ** (scaleDeg / 12.0));
+                var scaleDeg = ~currentScale[result[\scaleIdx]];  // ~currentScale を使用
+                var freq     = ~currentScaleRoot * (2 ** (scaleDeg / 12.0));
                 var stepDur  = 60.0 / ~turingBpm;
 
                 if (~turingRegister[0] == 1) {
@@ -1163,7 +1391,7 @@ s.waitForBoot({
         var amp  = msg[3].asFloat;
         var allowed = #[\matoma_rhythmic_grain, \matoma_rhythmic_klank,
                         \matoma_rhythmic_fm, \matoma_rhythmic_spring,
-                        \matoma_rhythmic_chaos];
+                        \matoma_rhythmic_chaos, \matoma_pad];
         {
             if (allowed.includes(synthName).not) {
                 "rhythmic/trigger: 許可されていないSynthDef '%' を無視".format(synthName).postln;
@@ -1215,6 +1443,63 @@ s.waitForBoot({
             });
         }.defer;
     }, '/matoma/rhythmic/load', nil, 57200);
+
+    // ── 共通スケール制約 OSCdef ─────────────────────────────────────
+    // /matoma/scale [scale_name(string), root_freq(float)]
+    //   scale_name : \minor_pentatonic | \dorian | \phrygian | \whole_tone | \chromatic
+    //   root_freq  : ルート周波数 (Hz)
+    OSCdef(\matoma_scale, { |msg|
+        var scaleName = msg[1].asSymbol;
+        var rootFreq  = msg[2].asFloat;
+        {
+            if (~scalePresets.includesKey(scaleName)) {
+                ~currentScaleName = scaleName;
+                ~currentScaleRoot = rootFreq.max(20.0);
+                ~currentScale     = ~scalePresets[scaleName];
+                ~buildScaleBuf.();
+                // glitch_burst シンセが動いていれば scaleBuf を即時更新
+                if (~glitchBurstSynth.notNil) {
+                    ~glitchBurstSynth.set(
+                        \scaleBuf,      ~scaleBuf.bufnum,
+                        \numScaleFreqs, ~scaleBuf.numFrames
+                    );
+                };
+                "スケール変更: % (root: % Hz)".format(scaleName, rootFreq.round(0.1)).postln;
+            } {
+                "スケール名が無効です: %（使用可能: %）".format(
+                    scaleName, ~scalePresets.keys).postln;
+            };
+        }.defer;
+    }, '/matoma/scale', nil, 57200);
+
+    // /matoma/chordprog/start [scene_name, bars_per_chord]
+    OSCdef(\matoma_chordprog_start, { |msg|
+        var sceneName = msg[1].asSymbol;
+        var bars      = msg[2].asFloat.max(1);
+        {
+            ~chordProgScene = sceneName;
+            ~chordProgBars  = bars;
+            ~chordBaseRoot  = ~currentScaleRoot;  // シーン切り替え時に設定済み
+            ~startChordProg.();
+        }.defer;
+    }, '/matoma/chordprog/start', nil, 57200);
+
+    // /matoma/chordprog/stop
+    OSCdef(\matoma_chordprog_stop, { |msg|
+        {
+            if (~chordProgRoutine.notNil) {
+                ~chordProgRoutine.stop; ~chordProgRoutine = nil;
+            };
+            "コード進行 停止".postln;
+        }.defer;
+    }, '/matoma/chordprog/stop', nil, 57200);
+
+    // /matoma/chordprog/set [bars_per_chord]  — 動的に小節数を変更
+    OSCdef(\matoma_chordprog_set, { |msg|
+        var bars = msg[1].asFloat.max(1);
+        { ~chordProgBars = bars;
+          "コード進行: %小節/コードに変更".format(bars).postln; }.defer;
+    }, '/matoma/chordprog/set', nil, 57200);
 
     // ══════════════════════════════════════════════════════════════
     // ■ STEP 8: PERCUSSION — CHAOS ENGINE 専用パーカッション音源
@@ -1289,6 +1574,25 @@ s.waitForBoot({
     s.sync;
     "グラニュラーサンプラー (ファイル読み込み型) ロード完了".postln;
 
+    // ══════════════════════════════════════════════════════════════════
+    // ■ STEP 8f: WARM PAD — 温かみのあるアンビエントパッド
+    //
+    //   LFTri デチューンユニゾン + tanh サチュレーション + GVerb 長残響。
+    //   Aphex Twin SAW 85-92期 × OPN Juno-60 コーラスパッド の美学。
+    //   起動後はオフ状態（OSC /matoma/pad/start で開始）。
+    // ══════════════════════════════════════════════════════════════════
+    load(~matomaScDir +/+ "warm_pad.scd");
+    s.sync;
+    "温かみパッド ロード完了".postln;
+
+    // ── ドローン・ボイシング制御 ─────────────────────────────────────
+    //   Scale.degreeToKey による調性制約付きコード生成。
+    //   Tim Hecker × OPN 美学: 層状持続音 × 記憶考古学的変容。
+    //   OSC /matoma/drone/voicing/{start,stop,set,key} で制御。
+    load(~matomaScDir +/+ "drone_voicing.scd");
+    s.sync;
+    "ドローン・ボイシング ロード完了".postln;
+
     ~currentGlitchGendy = nil;
     ~currentGlitchChaos = nil;
     ~currentGlitchBurst = nil;
@@ -1331,12 +1635,17 @@ s.waitForBoot({
 
     OSCdef(\matoma_glitch_burst_start, { |msg|
         { if (~currentGlitchBurst.notNil) { ~currentGlitchBurst.free };
-          ~currentGlitchBurst = Synth(\matoma_glitch_burst, addAction: \addToTail);
+          ~currentGlitchBurst = Synth(\matoma_glitch_burst, [
+              \scaleBuf,      ~scaleBuf.bufnum,
+              \numScaleFreqs, ~scaleBuf.numFrames
+          ], addAction: \addToTail);
+          ~glitchBurstSynth = ~currentGlitchBurst;  // /matoma/scale OSCdef から参照
           "グリッチ(BURST)開始".postln; }.defer;
     }, '/matoma/glitch/burst/start', nil, 57200);
 
     OSCdef(\matoma_glitch_burst_stop, { |msg|
         { ~currentGlitchBurst !? { ~currentGlitchBurst.free; ~currentGlitchBurst = nil };
+          ~glitchBurstSynth = nil;
           "グリッチ(BURST)停止".postln; }.defer;
     }, '/matoma/glitch/burst/stop', nil, 57200);
 

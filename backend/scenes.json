@@ -3,6 +3,8 @@
     "name": "深淵",
     "id": "void",
     "comment": "Space層が支配。低域・chaos低。Aoyama的な静寂",
+    "scale": {"name": "minor_pentatonic", "root_freq": 41.0},
+    "chord_prog": {"bars": 8},
     "organic_coupling": 0.0,
     "layers": {
       "granular": false,
@@ -37,11 +39,13 @@
     "name": "浮遊",
     "id": "warm",
     "comment": "標準。Aoyama的な粒子の場",
+    "scale": {"name": "dorian", "root_freq": 55.0},
+    "chord_prog": {"bars": 4},
     "organic_coupling": 0.35,
     "layers": {
       "granular": true,
       "spectral": false,
-      "turing": true
+      "turing": false
     },
     "space_ratio": 0.75,
     "event_ratio": 0.25,
@@ -71,11 +75,13 @@
     "name": "緊張",
     "id": "vast",
     "comment": "Event層が前に出る。Autechre的なカオス増大",
+    "scale": {"name": "whole_tone", "root_freq": 82.0},
+    "chord_prog": {"bars": 2},
     "organic_coupling": 0.7,
     "layers": {
       "granular": true,
       "spectral": true,
-      "turing": true
+      "turing": false
     },
     "space_ratio": 0.5,
     "event_ratio": 0.5,
@@ -113,11 +119,13 @@
     "name": "崩壊",
     "id": "lost",
     "comment": "最大chaos。Hecker的密度とAutechre的崩壊",
+    "scale": {"name": "phrygian", "root_freq": 110.0},
+    "chord_prog": {"bars": 2},
     "organic_coupling": 0.9,
     "layers": {
       "granular": true,
       "spectral": true,
-      "turing": true
+      "turing": false
     },
     "space_ratio": 0.4,
     "event_ratio": 0.6,

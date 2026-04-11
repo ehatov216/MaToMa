@@ -149,6 +149,43 @@ def load_record(
         return None
 
 
+def list_records(limit: int = 50) -> list[dict]:
+    """
+    SA DB のトラック一覧をカタログUI向けに返す。
+
+    Returns:
+        [{"track_id": str, "bpm": float, "key": str, "density": float}, ...]
+        DB が見つからない or エラー時は空リスト。
+    """
+    db_path = Path(SA_DB_PATH)
+    if not db_path.exists():
+        log.error(f"Sonic Anatomy DB が見つかりません: {db_path}")
+        return []
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT track_id, bpm, key_root, key_mode, onset_density
+                   FROM analysis_records
+                   WHERE bpm IS NOT NULL AND onset_density IS NOT NULL
+                   ORDER BY track_id
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
+            return [
+                {
+                    "track_id": str(r["track_id"]),
+                    "bpm": round(float(r["bpm"] or 0), 1),
+                    "key": f"{r['key_root'] or '?'} {r['key_mode'] or '?'}",
+                    "density": round(float(r["onset_density"] or 0), 2),
+                }
+                for r in rows
+            ]
+    except sqlite3.Error as exc:
+        log.error(f"Sonic Anatomy カタログ取得エラー: {exc}")
+        return []
+
+
 def _parse_json_list(raw: Optional[str], default: list) -> list:
     """SQLite の JSON 文字列を list にパースする。失敗時は default。"""
     if not raw:
@@ -325,27 +362,39 @@ def generate_tidal_seed(record: SonicAnatomyRecord) -> TidalSeed:
     else:
         primary_synth, sub_synth = SYNTH_KLANK, SYNTH_FM
 
-    # d1: メインリズム
+    # d1: メインリズム（ThreeLayerController の rhythmic レイヤーで動的制御）
+    # cF default "key" で Tidal Control Channel(port 6010)の値を参照
     if struct_pat:
         d1 = (
-            f'd1 $ degradeBy {degrade:.2f} $ {struct_pat}'
-            f' $ s "{primary_synth}" # amp 0.6'
+            f'd1 $ degradeBy (cF 0.3 "rhythmic_degrade") $ {struct_pat}'
+            f' $ s "{primary_synth}"'
+            f' # amp (cF 0.5 "rhythmic_amp")'
+            f' # freq (cF 300.0 "rhythmic_freq")'
         )
     else:
         hits = max(1, min(7, round(record.onset_density * 8)))
         d1 = (
-            f'd1 $ degradeBy {degrade:.2f} $ euclid {hits} 8'
-            f' $ s "{primary_synth}" # amp 0.6'
+            f'd1 $ degradeBy (cF 0.3 "rhythmic_degrade") $ euclid {hits} 8'
+            f' $ s "{primary_synth}"'
+            f' # amp (cF 0.5 "rhythmic_amp")'
+            f' # freq (cF 300.0 "rhythmic_freq")'
         )
 
     # d2: サブリズム（7ステップ Euclidean — 4/4 と位相がずれる）
     hits2 = max(1, min(5, round(record.onset_density * 6) + 1))
-    d2 = f'd2 $ euclid {hits2} 7 $ s "{sub_synth}" # amp 0.4'
+    d2 = (
+        f'd2 $ euclid {hits2} 7 $ s "{sub_synth}"'
+        f' # amp ((cF 0.5 "rhythmic_amp") * 0.7)'
+        f' # freq (cF 300.0 "rhythmic_freq")'
+    )
 
-    # d3: スパース呼吸層（SPRING をゆっくり、さらに degradeBy を上乗せ）
+    # d3: スパース呼吸層（SPRING をゆっくり、degrade に +0.2 上乗せ）
+    # rhythmic_degrade の上限は PARAM_SPECS で 0.70 なので +0.2 = 最大 0.90
     d3 = (
-        f'd3 $ degradeBy {min(0.9, degrade + 0.2):.2f} $ slow 3'
-        f' $ s "{SYNTH_SPRING}" # amp 0.3'
+        f'd3 $ degradeBy ((cF 0.3 "rhythmic_degrade") + 0.2) $ slow 3'
+        f' $ s "{SYNTH_SPRING}"'
+        f' # amp ((cF 0.5 "rhythmic_amp") * 0.55)'
+        f' # freq (cF 300.0 "rhythmic_freq")'
     )
 
     rhythm_lines = [d1, d2, d3]
@@ -365,8 +414,11 @@ def generate_tidal_seed(record: SonicAnatomyRecord) -> TidalSeed:
             f' # freq {_freqs_to_tidal(chord_freqs)} # amp 0.35'
         ),
         (
+            # ThreeLayerController が継続的に演算する melody_note (MIDIノート番号) を参照。
+            # cF 60 "melody_note" で Tidal Control Channel(port 6010)から取得し、
+            # SuperDirt の note パラメーターがfreqに変換する。
             f'd6 $ degradeBy 0.4 $ slow 12 $ s "{SYNTH_GRAIN}"'
-            f' # freq {_freqs_to_tidal(melody_freqs)} # amp 0.25'
+            f' # note (cF 60 "melody_note") # amp 0.25'
         ),
     ]
 

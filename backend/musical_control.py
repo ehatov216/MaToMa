@@ -29,6 +29,16 @@ KEYS = ["c", "cs", "d", "ef", "e", "f", "fs", "g", "af", "a", "bf", "b"]
 
 SCALES = ["minor", "major", "dorian", "phrygian", "lydian", "mixolydian"]
 
+# スケール → 半音インターバル（スケール上の各音の半音数）
+SCALE_INTERVALS: dict[str, list[int]] = {
+    "major":      [0, 2, 4, 5, 7, 9, 11],
+    "minor":      [0, 2, 3, 5, 7, 8, 10],
+    "dorian":     [0, 2, 3, 5, 7, 9, 10],
+    "phrygian":   [0, 1, 3, 5, 7, 8, 10],
+    "lydian":     [0, 2, 4, 6, 7, 9, 11],
+    "mixolydian": [0, 2, 4, 5, 7, 9, 10],
+}
+
 # キー → MIDIベース音（オクターブ4）
 KEY_MIDI_BASE: dict[str, int] = {
     "c": 48, "cs": 49, "d": 50, "ef": 51,
@@ -343,10 +353,28 @@ class MusicalControl:
         log.debug("Tidal d8: %s", code)
         self._tidal.evaluate(code)
 
+    @staticmethod
+    def _scale_idx_to_hz(midi_base: int, scale_name: str, idx: int) -> float:
+        """スケール上のインデックスをHz値に変換する。
+
+        idx はスケール上の位置（0=ルート、1=2度、2=3度…）。
+        インデックスがスケール音数を超えた場合はオクターブを上げる。
+        BootTidal_matoma.hs の ArgList は n を持たないため、
+        freq を直接 Hz で渡す必要がある。
+        """
+        intervals = SCALE_INTERVALS.get(scale_name, SCALE_INTERVALS["minor"])
+        semitone = intervals[idx % len(intervals)]
+        octave_bump = (idx // len(intervals)) * 12
+        midi = midi_base + semitone + octave_bump
+        return 440.0 * (2 ** ((midi - 69) / 12.0))
+
     def _generate_tidal_code(self) -> str:
         """コードディグリー・キー・スケールから Tidal コードを生成する。
 
-        例: d8 $ n (scale "minor" "0 2 4" + 48) # s "matoma_pad" # gain 0.5
+        n (scale ...) ではなく freq "<hz1 hz2 hz3>" を使う。
+        BootTidal_matoma.hs の ArgList に n が含まれないため、
+        Tidal の n パラメーターは SC に届かず 440Hz 固定になってしまう。
+        Python 側で Hz を計算して freq に直接渡すことで正しい音程を実現する。
         """
         key, scale = self._resolve_key_scale()
         degree = self._resolve_chord_degree()
@@ -354,10 +382,7 @@ class MusicalControl:
         midi_base = KEY_MIDI_BASE.get(key, 48)
         voicing = CHORD_VOICING.get(degree % 8, [0, 2, 4])
 
-        # 各構成音をスケール上のインデックスとして表現し、MIDIオフセットを足す
-        note_str = " ".join(str(n) for n in voicing)
+        hz_values = [self._scale_idx_to_hz(midi_base, scale, idx) for idx in voicing]
+        freq_str = " ".join(f"{hz:.1f}" for hz in hz_values)
 
-        return (
-            f'd8 $ n (scale "{scale}" "{note_str}" + {midi_base})'
-            f' # s "matoma_pad" # gain 0.5'
-        )
+        return f'd8 $ freq "<{freq_str}>" # s "matoma_pad" # gain 0.5'

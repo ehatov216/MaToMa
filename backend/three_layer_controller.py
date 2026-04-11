@@ -65,6 +65,13 @@ PARAM_SPECS: dict[str, dict[str, tuple]] = {
     "melody": {
         "note": (36.0, 72.0, 48.0, "_tidal_ctrl"),
     },
+    # rhythmic レイヤー: Tidal Control Channel 経由でd1/d2/d3の疎密・音量・音程を制御
+    # degrade max=0.70 → d3の +0.2 加算後も 0.90 を超えない設計
+    "rhythmic": {
+        "degrade": (0.0,   0.70,   0.30, "_tidal_ctrl"),
+        "amp":     (0.0,   1.0,    0.50, "_tidal_ctrl"),
+        "freq":    (80.0,  600.0, 300.0, "_tidal_ctrl"),
+    },
 }
 
 # ── Markov 状態定義 ───────────────────────────────────────────────────────
@@ -75,168 +82,203 @@ STATES: list[str] = ["void", "sparse", "medium", "dense", "intense"]
 # width:  Middle が center からどれだけ離れられるか（ゾーン半幅）
 STATE_ZONES: dict[str, dict[str, dict[str, dict[str, float]]]] = {
     "void": {
+        # void: ほぼ完全な静寂・消音状態
         "drone": {
-            "feedback_amt": {"center": 0.10, "width": 0.06},
-            "shimmer":      {"center": 0.10, "width": 0.06},
-            "room":         {"center": 0.80, "width": 0.08},
-            "amp":          {"center": 0.15, "width": 0.04},
+            "feedback_amt": {"center": 0.03, "width": 0.03},
+            "shimmer":      {"center": 0.03, "width": 0.03},
+            "room":         {"center": 0.95, "width": 0.04},  # 広大なリバーブ=音が霧散する
+            "amp":          {"center": 0.04, "width": 0.02},  # ほぼ消音
         },
         "granular": {
-            "density": {"center":  5.0, "width": 3.0},
-            "spray":   {"center": 0.10, "width": 0.06},
-            "pos":     {"center": 0.50, "width": 0.15},
-            "room":    {"center": 0.80, "width": 0.08},
+            "density": {"center":  2.0, "width": 1.5},   # 極少粒
+            "spray":   {"center": 0.04, "width": 0.03},
+            "pos":     {"center": 0.50, "width": 0.10},
+            "room":    {"center": 0.92, "width": 0.05},
         },
         "gran_synth": {
-            "density":  {"center":  8.0, "width": 4.0},
-            "grainDur": {"center": 0.25, "width": 0.10},
-            "bright":   {"center": 0.10, "width": 0.06},
-            "chaos":    {"center": 0.10, "width": 0.05},
-            "room":     {"center": 0.90, "width": 0.06},
-            "amp":      {"center": 0.10, "width": 0.04},
+            "density":  {"center":  3.0, "width": 2.0},  # 極少粒
+            "grainDur": {"center": 0.35, "width": 0.10}, # 長いグレイン=ぼんやり
+            "bright":   {"center": 0.03, "width": 0.03}, # 極暗い
+            "chaos":    {"center": 0.03, "width": 0.02}, # 秩序的・動かない
+            "room":     {"center": 0.95, "width": 0.04},
+            "amp":      {"center": 0.03, "width": 0.02}, # ほぼ消音
         },
         "gran_sampler": {
-            "pos":     {"center": 0.50, "width": 0.15},
-            "density": {"center":  5.0, "width": 3.0},
-            "spray":   {"center": 0.10, "width": 0.06},
-            "room":    {"center": 0.90, "width": 0.06},
-            "amp":     {"center": 0.10, "width": 0.04},
+            "pos":     {"center": 0.50, "width": 0.10},
+            "density": {"center":  2.0, "width": 1.5},
+            "spray":   {"center": 0.04, "width": 0.03},
+            "room":    {"center": 0.95, "width": 0.04},
+            "amp":     {"center": 0.03, "width": 0.02}, # ほぼ消音
         },
-        # void: 低音域でほぼ動かない（C2〜C3付近）
+        # void: 極低音（C2付近）・ほぼ動かない
         "melody": {
-            "note": {"center": 40.0, "width": 4.0},
+            "note": {"center": 36.0, "width": 3.0},
+        },
+        # void: リズムほぼ消音（degrade高い=音が消える）
+        "rhythmic": {
+            "degrade": {"center": 0.82, "width": 0.05}, # 82%消音
+            "amp":     {"center": 0.04, "width": 0.03},
+            "freq":    {"center":  80.0, "width": 15.0},
         },
     },
     "sparse": {
+        # sparse: 静寂からわずかに息吹く・点描
         "drone": {
-            "feedback_amt": {"center": 0.20, "width": 0.08},
-            "shimmer":      {"center": 0.30, "width": 0.10},
-            "room":         {"center": 0.70, "width": 0.10},
-            "amp":          {"center": 0.25, "width": 0.06},
+            "feedback_amt": {"center": 0.18, "width": 0.08},
+            "shimmer":      {"center": 0.25, "width": 0.10},
+            "room":         {"center": 0.78, "width": 0.08},
+            "amp":          {"center": 0.22, "width": 0.06},
         },
         "granular": {
-            "density": {"center": 10.0, "width": 4.0},
-            "spray":   {"center": 0.30, "width": 0.12},
-            "pos":     {"center": 0.50, "width": 0.20},
-            "room":    {"center": 0.60, "width": 0.10},
+            "density": {"center":  9.0, "width": 4.0},
+            "spray":   {"center": 0.22, "width": 0.10},
+            "pos":     {"center": 0.50, "width": 0.18},
+            "room":    {"center": 0.68, "width": 0.10},
         },
         "gran_synth": {
             "density":  {"center": 15.0, "width": 6.0},
-            "grainDur": {"center": 0.20, "width": 0.08},
-            "bright":   {"center": 0.30, "width": 0.12},
-            "chaos":    {"center": 0.20, "width": 0.08},
-            "room":     {"center": 0.70, "width": 0.08},
-            "amp":      {"center": 0.20, "width": 0.06},
+            "grainDur": {"center": 0.24, "width": 0.08},
+            "bright":   {"center": 0.22, "width": 0.10},
+            "chaos":    {"center": 0.18, "width": 0.08},
+            "room":     {"center": 0.75, "width": 0.08},
+            "amp":      {"center": 0.18, "width": 0.06},
         },
         "gran_sampler": {
-            "pos":     {"center": 0.50, "width": 0.20},
-            "density": {"center": 10.0, "width": 4.0},
-            "spray":   {"center": 0.20, "width": 0.08},
-            "room":    {"center": 0.70, "width": 0.08},
-            "amp":     {"center": 0.20, "width": 0.06},
+            "pos":     {"center": 0.50, "width": 0.18},
+            "density": {"center":  9.0, "width": 4.0},
+            "spray":   {"center": 0.16, "width": 0.08},
+            "room":    {"center": 0.75, "width": 0.08},
+            "amp":     {"center": 0.18, "width": 0.06},
         },
-        # sparse: 低音〜中低音（C3付近）、やや広め
+        # sparse: 低音〜中低音（A2付近）
         "melody": {
-            "note": {"center": 47.0, "width": 6.0},
+            "note": {"center": 45.0, "width": 6.0},
+        },
+        # sparse: 散発的・低音
+        "rhythmic": {
+            "degrade": {"center": 0.60, "width": 0.10},
+            "amp":     {"center": 0.26, "width": 0.08},
+            "freq":    {"center": 160.0, "width": 35.0},
         },
     },
     "medium": {
+        # medium: バランスの取れた中間地点
         "drone": {
-            "feedback_amt": {"center": 0.25, "width": 0.10},
-            "shimmer":      {"center": 0.40, "width": 0.15},
-            "room":         {"center": 0.70, "width": 0.12},
-            "amp":          {"center": 0.35, "width": 0.06},
+            "feedback_amt": {"center": 0.30, "width": 0.10},
+            "shimmer":      {"center": 0.48, "width": 0.15},
+            "room":         {"center": 0.58, "width": 0.10},
+            "amp":          {"center": 0.44, "width": 0.07},
         },
         "granular": {
-            "density": {"center": 15.0, "width": 6.0},
-            "spray":   {"center": 0.50, "width": 0.18},
+            "density": {"center": 18.0, "width": 6.0},
+            "spray":   {"center": 0.48, "width": 0.16},
             "pos":     {"center": 0.50, "width": 0.25},
-            "room":    {"center": 0.50, "width": 0.12},
+            "room":    {"center": 0.48, "width": 0.12},
         },
         "gran_synth": {
-            "density":  {"center": 30.0, "width": 10.0},
-            "grainDur": {"center": 0.18, "width": 0.08},
-            "bright":   {"center": 0.40, "width": 0.15},
-            "chaos":    {"center": 0.30, "width": 0.12},
-            "room":     {"center": 0.60, "width": 0.10},
-            "amp":      {"center": 0.40, "width": 0.06},
+            "density":  {"center": 38.0, "width": 10.0},
+            "grainDur": {"center": 0.16, "width": 0.07},
+            "bright":   {"center": 0.45, "width": 0.14},
+            "chaos":    {"center": 0.40, "width": 0.14},
+            "room":     {"center": 0.55, "width": 0.10},
+            "amp":      {"center": 0.44, "width": 0.07},
         },
         "gran_sampler": {
             "pos":     {"center": 0.50, "width": 0.25},
-            "density": {"center": 20.0, "width": 8.0},
-            "spray":   {"center": 0.30, "width": 0.12},
+            "density": {"center": 25.0, "width": 8.0},
+            "spray":   {"center": 0.38, "width": 0.14},
             "room":    {"center": 0.50, "width": 0.10},
-            "amp":     {"center": 0.50, "width": 0.06},
+            "amp":     {"center": 0.50, "width": 0.07},
         },
-        # medium: 中音域（C3〜C4）、程よい揺れ
+        # medium: 中音域（F#3付近）
         "melody": {
             "note": {"center": 54.0, "width": 8.0},
         },
+        # medium: 標準密度・中音域
+        "rhythmic": {
+            "degrade": {"center": 0.33, "width": 0.08},
+            "amp":     {"center": 0.50, "width": 0.08},
+            "freq":    {"center": 290.0, "width": 55.0},
+        },
     },
     "dense": {
+        # dense: 音が溢れ始める・緊張感
         "drone": {
-            "feedback_amt": {"center": 0.35, "width": 0.12},
-            "shimmer":      {"center": 0.60, "width": 0.18},
-            "room":         {"center": 0.60, "width": 0.12},
-            "amp":          {"center": 0.50, "width": 0.06},
+            "feedback_amt": {"center": 0.52, "width": 0.12},
+            "shimmer":      {"center": 0.72, "width": 0.16},
+            "room":         {"center": 0.36, "width": 0.10},
+            "amp":          {"center": 0.66, "width": 0.07},
         },
         "granular": {
-            "density": {"center": 25.0, "width": 8.0},
-            "spray":   {"center": 0.60, "width": 0.18},
-            "pos":     {"center": 0.50, "width": 0.30},
-            "room":    {"center": 0.40, "width": 0.12},
+            "density": {"center": 38.0, "width": 10.0},
+            "spray":   {"center": 0.68, "width": 0.16},
+            "pos":     {"center": 0.50, "width": 0.32},
+            "room":    {"center": 0.28, "width": 0.10},
         },
         "gran_synth": {
-            "density":  {"center": 45.0, "width": 12.0},
-            "grainDur": {"center": 0.14, "width": 0.06},
-            "bright":   {"center": 0.60, "width": 0.18},
-            "chaos":    {"center": 0.50, "width": 0.15},
-            "room":     {"center": 0.40, "width": 0.10},
-            "amp":      {"center": 0.50, "width": 0.06},
+            "density":  {"center": 62.0, "width": 14.0},
+            "grainDur": {"center": 0.09, "width": 0.04},
+            "bright":   {"center": 0.72, "width": 0.16},
+            "chaos":    {"center": 0.68, "width": 0.16},
+            "room":     {"center": 0.28, "width": 0.08},
+            "amp":      {"center": 0.68, "width": 0.07},
         },
         "gran_sampler": {
-            "pos":     {"center": 0.50, "width": 0.30},
-            "density": {"center": 35.0, "width": 10.0},
-            "spray":   {"center": 0.50, "width": 0.15},
-            "room":    {"center": 0.40, "width": 0.10},
-            "amp":     {"center": 0.55, "width": 0.06},
+            "pos":     {"center": 0.50, "width": 0.32},
+            "density": {"center": 55.0, "width": 12.0},
+            "spray":   {"center": 0.65, "width": 0.16},
+            "room":    {"center": 0.28, "width": 0.08},
+            "amp":     {"center": 0.72, "width": 0.07},
         },
-        # dense: 中高音域（C4付近）、動きが大きい
+        # dense: 中高音域（D4付近）
         "melody": {
-            "note": {"center": 60.0, "width": 8.0},
+            "note": {"center": 62.0, "width": 9.0},
+        },
+        # dense: 高密度・中高音
+        "rhythmic": {
+            "degrade": {"center": 0.08, "width": 0.05},
+            "amp":     {"center": 0.76, "width": 0.08},
+            "freq":    {"center": 450.0, "width": 85.0},
         },
     },
     "intense": {
+        # intense: 飽和・爆発・音が溢れ出す
         "drone": {
-            "feedback_amt": {"center": 0.45, "width": 0.15},
-            "shimmer":      {"center": 0.80, "width": 0.15},
-            "room":         {"center": 0.50, "width": 0.12},
-            "amp":          {"center": 0.65, "width": 0.06},
+            "feedback_amt": {"center": 0.72, "width": 0.15},
+            "shimmer":      {"center": 0.94, "width": 0.05},
+            "room":         {"center": 0.14, "width": 0.08}, # ほぼドライ=圧迫感
+            "amp":          {"center": 0.88, "width": 0.07},
         },
         "granular": {
-            "density": {"center": 35.0, "width": 10.0},
-            "spray":   {"center": 0.70, "width": 0.18},
-            "pos":     {"center": 0.50, "width": 0.35},
-            "room":    {"center": 0.30, "width": 0.10},
+            "density": {"center": 58.0, "width": 12.0},
+            "spray":   {"center": 0.88, "width": 0.08},
+            "pos":     {"center": 0.50, "width": 0.40},
+            "room":    {"center": 0.12, "width": 0.08},
         },
         "gran_synth": {
-            "density":  {"center": 55.0, "width": 15.0},
-            "grainDur": {"center": 0.10, "width": 0.05},
-            "bright":   {"center": 0.80, "width": 0.15},
-            "chaos":    {"center": 0.70, "width": 0.18},
-            "room":     {"center": 0.30, "width": 0.08},
-            "amp":      {"center": 0.65, "width": 0.06},
+            "density":  {"center": 88.0, "width": 18.0}, # 最大粒密度
+            "grainDur": {"center": 0.05, "width": 0.03}, # 極短グレイン=ノイズ的
+            "bright":   {"center": 0.94, "width": 0.05}, # 極明るい
+            "chaos":    {"center": 0.92, "width": 0.07}, # 極カオス
+            "room":     {"center": 0.12, "width": 0.07},
+            "amp":      {"center": 0.88, "width": 0.07},
         },
         "gran_sampler": {
-            "pos":     {"center": 0.50, "width": 0.35},
-            "density": {"center": 50.0, "width": 12.0},
-            "spray":   {"center": 0.70, "width": 0.18},
-            "room":    {"center": 0.30, "width": 0.08},
-            "amp":     {"center": 0.70, "width": 0.06},
+            "pos":     {"center": 0.50, "width": 0.40},
+            "density": {"center": 78.0, "width": 14.0},
+            "spray":   {"center": 0.86, "width": 0.10},
+            "room":    {"center": 0.12, "width": 0.07},
+            "amp":     {"center": 0.90, "width": 0.07},
         },
-        # intense: 高音域（C4〜C5）、最も広い揺れ幅
+        # intense: 高音域（Bb4付近）・最大揺れ幅
         "melody": {
-            "note": {"center": 65.0, "width": 8.0},
+            "note": {"center": 70.0, "width": 10.0},
+        },
+        # intense: 最高密度・ほぼ途切れない
+        "rhythmic": {
+            "degrade": {"center": 0.01, "width": 0.01}, # ほぼ100%発音
+            "amp":     {"center": 0.94, "width": 0.05},
+            "freq":    {"center": 640.0, "width": 110.0},
         },
     },
 }
@@ -419,6 +461,16 @@ class UpperLayer:
 
     def set_snap_override(self, prob: float | None) -> None:
         self._snap_override = prob
+
+    def force_state(self, state: str) -> None:
+        """Markov状態を強制設定する（シーン切り替え時に使用）。"""
+        if state not in STATES:
+            logger.warning("[Upper] force_state: unknown state=%s", state)
+            return
+        logger.info("[Upper] force_state: %s → %s", self._state, state)
+        self._state = state
+        self._state_start = time.time()
+        self._overrides.clear()
 
     def set_interval(self, seconds: float) -> None:
         self._interval = max(5.0, float(seconds))
@@ -622,6 +674,17 @@ class ThreeLayerController:
         """下位カオス比率（現バージョンでは snap_prob の反転として解釈）。"""
         self.set_dejavu_prob(1.0 - ratio)
 
+    # シーン名（MusicGenerator/SCENE_DNA）→ Markov状態（ThreeLayerController）のマッピング
+    # onset_density_target の大小に基づき対応付ける:
+    #   void(0.2)=void, vast(0.3)=sparse, warm(0.4)=medium, lost(0.6)=dense, peak(0.9)=intense
+    _SCENE_TO_MARKOV: dict[str, str] = {
+        "void":  "void",
+        "vast":  "sparse",
+        "warm":  "medium",
+        "lost":  "dense",
+        "peak":  "intense",
+    }
+
     def set_scene(self, scene: dict) -> None:
         """シーン定義に従ってゾーン中心を更新する（現在値は急変しない）。"""
         drone   = scene.get("drone", {})
@@ -640,6 +703,35 @@ class ThreeLayerController:
             width = entry[3] if len(entry) > 3 else None
             if center is not None:
                 self._upper.set_zone_override(layer, param, float(center), width)
+
+    def set_markov_state_from_scene(self, scene_name: str) -> None:
+        """シーン名をMarkov状態に変換してUpperLayerに強制適用する。
+
+        Middle値も新しい状態のcenterへ即スナップして変化を即座に聴覚化する。
+        """
+        markov_state = self._SCENE_TO_MARKOV.get(scene_name)
+        if markov_state is None:
+            logger.warning("[Controller] set_markov_state_from_scene: unknown scene=%s", scene_name)
+            return
+        self._upper.force_state(markov_state)
+        # Middle値を新状態のcenterへ即スナップ（BoundedWalkのじわじわ収束を回避）
+        self._snap_middle_to_state(markov_state)
+
+    def _snap_middle_to_state(self, state: str) -> None:
+        """指定状態のSTATE_ZONESのcenter値へMiddleを即座にリセットする。"""
+        zones = STATE_ZONES.get(state, {})
+        new_params: dict[str, dict[str, _ParamState]] = {}
+        for layer, params in self._params.items():
+            new_layer: dict[str, _ParamState] = {}
+            for param, ps in params.items():
+                center = zones.get(layer, {}).get(param, {}).get("center")
+                if center is not None:
+                    new_layer[param] = ps.with_values(center, center)
+                else:
+                    new_layer[param] = ps
+            new_params[layer] = new_layer
+        self._params = new_params
+        logger.info("[Controller] snapped Middle to state=%s", state)
 
     def get_state(self) -> dict:
         """全パラメーターの現在状態を返す（UI表示用・ChaosEngine 互換形式）。

@@ -10,13 +10,14 @@ SCENE DNAがシーンごとの音楽的性格を定義し、
 Sonic Anatomyデータが初期スケール・音程・リズムをシードとして提供する。
 """
 
+import asyncio
 import logging
 import math
 import random
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Protocol
 
 from sonic_anatomy_bridge import (
     ROOT_TO_SEMITONE,
@@ -225,6 +226,105 @@ def _compute_sa_activity_multiplier(
     return min(8.0, max(density_factor, chord_factor))
 
 
+def _build_rhythmic_lines(
+    synth_a: str,
+    synth_b: str,
+    density: float,
+    degrade: float,
+    amp_main: float,
+    freq_str: str,
+    tidal_slow: int = 4,
+    rhythm_str: Optional[str] = None,
+) -> list[str]:
+    """d1 / d2 のリズム系Tidalコードを生成する（モジュールレベル関数）。
+
+    SAリズムパターンがある場合は struct を使い、ない場合は euclid を使う。
+    d2 の slow はシーンの tidal_slow に連動する。
+    """
+    hits, steps = _select_euclid(density)
+    d2_slow = max(1, tidal_slow // 2)
+    d2_degrade = min(degrade + 0.15, 0.92)
+    d2_amp = amp_main * 0.6
+    d1_rhythm = f"struct {rhythm_str}" if rhythm_str else f"euclid {hits} {steps}"
+    return [
+        f'd1 $ degradeBy {degrade:.2f} $ {d1_rhythm} '
+        f'$ s "{synth_a}" # freq {freq_str} # amp {amp_main:.2f}',
+        f'd2 $ slow {d2_slow} $ degradeBy {d2_degrade:.2f} '
+        f'$ s "{synth_b}" # freq {freq_str} # amp {d2_amp:.2f}',
+    ]
+
+
+def _build_pad_lines(
+    synth_a: str,
+    synth_b: str,
+    tidal_slow: int,
+    amp_pad: float,
+    chord_str: str,
+    onset_density: float = 0.4,
+) -> list[str]:
+    """d5 / d6 のスロー系（パッド）Tidalコードを生成する（モジュールレベル関数）。"""
+    very_slow = tidal_slow * 2
+    d6_amp = amp_pad * 0.7
+    d6_degrade = max(0.2, min(0.8, 0.8 - onset_density * 0.4))
+    return [
+        f'd5 $ slow {tidal_slow} $ s "{synth_a}" '
+        f'# freq {chord_str} # amp {amp_pad:.2f}',
+        f'd6 $ degradeBy {d6_degrade:.2f} $ slow {very_slow} '
+        f'$ s "{synth_b}" # freq {chord_str} # amp {d6_amp:.2f}',
+    ]
+
+
+def _shape_melodic_contour(freqs: list[float], arc_phase: float) -> list[float]:
+    """arc_phase に基づいてメロディ輪郭を形成する（Layer 5 - Melodic Contour）。
+
+    Tidal の角括弧パターン内の周波数順が輪郭の方向性を決定する。
+    arc_phase 0.00-0.33: ascending  (低→高, 緊張の積み上げ)
+    arc_phase 0.33-0.67: arch       (中→高→低, エネルギーの弧)
+    arc_phase 0.67-1.00: descending (高→低, 解決・落下)
+    """
+    if len(freqs) <= 1:
+        return freqs
+    asc = sorted(freqs)
+    if arc_phase < 0.33:
+        return asc
+    if arc_phase < 0.67:
+        # arch: 最低音 → 最高音 → 中音 (頂点経由)
+        if len(asc) >= 3:
+            return [asc[0], asc[-1], asc[1]]
+        return [asc[-1], asc[0]]
+    return list(reversed(asc))
+
+
+def _build_expression_lines(
+    synth_a: str,
+    synth_b: str,
+    tidal_slow: int,
+    amp_exp: float,
+    freq_str: str,
+    arc_phase: float,
+) -> list[str]:
+    """d3 / d4 の表情層 Tidal コードを生成する（Layer 6 - Articulation）。
+
+    d3: メロディ表情（arc_phase 連動パンニング + 振幅変調パターン）
+    d4: ミクロダイナミクス（超スロー、対称パン、超低振幅フェード）
+    """
+    pan_d3 = round(0.2 + arc_phase * 0.6, 2)
+    pan_d4 = round(0.8 - arc_phase * 0.6, 2)
+    a0 = f"{amp_exp:.2f}"
+    a1 = f"{amp_exp * 0.7:.2f}"
+    a2 = f"{min(0.7, amp_exp * 1.3):.2f}"
+    a3 = f"{amp_exp * 0.5:.2f}"
+    amp_pat = f'"<{a0} {a1} {a2} {a3}>"'
+    d4_slow = max(tidal_slow * 3, 6)
+    d4_amp = round(amp_exp * 0.4, 2)
+    return [
+        f'd3 $ slow 2 $ degradeBy 0.4 $ s "{synth_a}" '
+        f'# freq {freq_str} # amp {amp_pat} # pan {pan_d3}',
+        f'd4 $ slow {d4_slow} $ degradeBy 0.7 '
+        f'$ s "{synth_b}" # freq {freq_str} # amp {d4_amp} # pan {pan_d4}',
+    ]
+
+
 # ── データクラス ────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -326,6 +426,306 @@ class GlobalClock:
         return False
 
 
+# ── Strategyパターン ────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class MiddleLayerContext:
+    """MiddleLayerStrategy.tick() に渡す入力（イミュータブル）。"""
+    dna: dict
+    current_degree: str
+    sa_chord_sequence: tuple  # tuple[str, ...]
+    sa_chord_idx: int
+
+
+@dataclass(frozen=True)
+class MiddleLayerResult:
+    """MiddleLayerStrategy.tick() の返り値。"""
+    degree: str
+    sa_chord_idx: int
+
+
+@dataclass(frozen=True)
+class LowerLayerContext:
+    """LowerLayerStrategy.generate() に渡す入力（イミュータブル）。"""
+    scale: Scale
+    dna: dict
+    seed: Optional[SonicAnatomyRecord]
+    current_degree: str
+    arc_phase: float
+    synth_a: str
+    synth_b: str
+
+
+class MiddleLayerStrategy(Protocol):
+    """MiddleLayerのアルゴリズムインターフェース。"""
+
+    def tick(self, ctx: MiddleLayerContext) -> MiddleLayerResult: ...
+
+
+class LowerLayerStrategy(Protocol):
+    """LowerLayerのアルゴリズムインターフェース。"""
+
+    def generate(self, ctx: LowerLayerContext, include_pads: bool) -> list[str]: ...
+
+
+class GravityMarkovStrategy:
+    """Gravity Matrix + Markov 遷移によるコード度数選択（デフォルト MiddleLayer）。
+
+    混合比率: GravityMatrix 40% + Markov遷移 60% + SAコード進行 +40%ブースト
+    """
+
+    def tick(self, ctx: MiddleLayerContext) -> MiddleLayerResult:
+        all_degrees = ["I", "II", "III", "IV", "V", "VI", "VII"]
+        dna = ctx.dna
+        sa_seq = list(ctx.sa_chord_sequence)
+        sa_idx = ctx.sa_chord_idx
+
+        gravity_type = dna.get("chord_gravity", "tonic")
+        gravity_map = GRAVITY.get(gravity_type, GRAVITY["tonic"])
+        gravity_raw = {d: gravity_map.get(d, 0.0) for d in all_degrees}
+
+        markov_map = DEGREE_TRANSITIONS.get(ctx.current_degree, {})
+        markov_raw = {d: markov_map.get(d, 0.0) for d in all_degrees}
+
+        uniform = 1.0 / len(all_degrees)
+        g_total = sum(gravity_raw.values())
+        m_total = sum(markov_raw.values())
+        gw = (
+            {d: gravity_raw[d] / g_total for d in all_degrees}
+            if g_total > 0 else {d: uniform for d in all_degrees}
+        )
+        mw = (
+            {d: markov_raw[d] / m_total for d in all_degrees}
+            if m_total > 0 else {d: uniform for d in all_degrees}
+        )
+        blended = {d: 0.4 * gw[d] + 0.6 * mw[d] for d in all_degrees}
+
+        sa_degree: str | None = None
+        if sa_seq:
+            sa_degree = sa_seq[sa_idx % len(sa_seq)]
+            if sa_degree in blended:
+                blended[sa_degree] *= 1.4
+
+        total = sum(blended.values())
+        weights = [blended[d] / total for d in all_degrees]
+        chosen = random.choices(all_degrees, weights=weights, k=1)[0]
+        new_idx = (sa_idx + 1) % len(sa_seq) if sa_seq else 0
+
+        log.debug(
+            "MiddleLayer[GravityMarkov]: コード度数 → %s "
+            "(SA引力点=%s, Markov元=%s)",
+            chosen, sa_degree or "none", ctx.current_degree,
+        )
+        return MiddleLayerResult(degree=chosen, sa_chord_idx=new_idx)
+
+
+class EuclidTemplateStrategy:
+    """ユークリッドリズム + Tidalテンプレートによる LowerLayer デフォルト実装。"""
+
+    def generate(self, ctx: LowerLayerContext, include_pads: bool) -> list[str]:
+        scale = ctx.scale
+        dna = ctx.dna
+        seed = ctx.seed
+        degree = ctx.current_degree
+
+        onset_density = (
+            seed.onset_density if seed
+            else dna.get("onset_density_target", 0.4)
+        )
+        tidal_slow = dna.get("tidal_slow", 4)
+
+        amp_main = min(0.7, max(0.1,
+            0.3 + onset_density * 0.4 + random.gauss(0, 0.03)
+        ))
+        amp_pad = min(0.4, max(0.05,
+            0.1 + onset_density * 0.2 + random.gauss(0, 0.02)
+        ))
+        degrade = max(0.05, min(0.95,
+            0.9 - onset_density + random.gauss(0, 0.04)
+        ))
+
+        melody_octave = 5 if ctx.arc_phase > 0.6 else 4
+
+        if seed:
+            raw_main = pitch_class_to_freqs(
+                seed.pitch_class_distribution,
+                scale.root, scale.sa_mode,
+                top_n=3, octave=melody_octave,
+            )
+        else:
+            root_hz = _midi_to_hz(melody_octave * 12 + scale.root_semitone)
+            raw_main = [root_hz, root_hz * 1.498]
+
+        chord_hz = _build_diatonic_voicing(degree, scale, octave=3)
+        shifted_main = _apply_degree_shift(raw_main, degree)
+        root_s = scale.root_semitone
+        quantized_main = [
+            _midi_to_hz(quantize(_hz_to_midi(f), root_s, scale.mode))
+            for f in shifted_main if f > 0
+        ]
+        # Layer 5: Melodic Contour — arc_phase で輪郭方向を整形
+        contoured = _shape_melodic_contour(quantized_main[:3], ctx.arc_phase)
+        freq_str = _freqs_to_tidal_str(contoured)
+        chord_str = _freqs_to_tidal_str(chord_hz)
+
+        rhythm_str: Optional[str] = None
+        if seed and seed.rhythm_pattern:
+            rhythm_str = _rhythm_pattern_to_tidal(seed.rhythm_pattern)
+
+        lines = _build_rhythmic_lines(
+            ctx.synth_a, ctx.synth_b,
+            onset_density, degrade, amp_main, freq_str,
+            tidal_slow=tidal_slow, rhythm_str=rhythm_str,
+        )
+        if include_pads:
+            lines += _build_pad_lines(
+                ctx.synth_a, ctx.synth_b,
+                tidal_slow, amp_pad, chord_str,
+                onset_density=onset_density,
+            )
+            # Layer 6: Articulation — d3/d4 で表情・ミクロダイナミクス
+            lines += _build_expression_lines(
+                ctx.synth_a, ctx.synth_b,
+                tidal_slow, amp_pad, freq_str, ctx.arc_phase,
+            )
+        return lines
+
+
+class LSystemStrategy:
+    """L-System（Lindenmayerシステム）による自己相似的リズム生成 LowerLayer 実装。
+
+    公理 "F" / "G" から書き換えルールを反復適用してリズム文字列を生成し、
+    Tidal の struct パターンに変換する。
+    onset_density が深度を決定し、高密度ほど複雑な自己相似構造を生成する。
+
+    RAG: design_multiscale_generation.md — 下位レイヤー=Lシステム（ミクロモチーフ）
+    """
+
+    # onset_density < 0.5: 疎・広がり / >= 0.5: 密・緊張
+    _RULE_SETS: dict[str, dict[str, str]] = {
+        "sparse": {"F": "F-F", "G": "F--G"},
+        "dense":  {"F": "FF-F", "G": "FGF"},
+    }
+
+    def _evolve(self, axiom: str, rules: dict[str, str], depth: int) -> str:
+        """L-System 文字列置換を depth 世代分適用する。"""
+        current = axiom
+        for _ in range(depth):
+            current = "".join(rules.get(c, c) for c in current)
+            if len(current) > 256:  # 爆発防止
+                break
+        return current
+
+    def _to_rhythm_pattern(self, lstring: str, steps: int = 16) -> list[int]:
+        """L-System 文字列を steps 個の 0/1 リズムパターンに変換する。
+
+        F → 1 (音あり), - → 0 (休符), それ以外は無視
+        """
+        raw: list[int] = [
+            1 if ch == "F" else 0
+            for ch in lstring if ch in ("F", "-")
+        ]
+        if not raw:
+            return [1] + [0] * (steps - 1)
+        if len(raw) >= steps:
+            indices = [int(i * len(raw) / steps) for i in range(steps)]
+            return [raw[i] for i in indices]
+        return [raw[i % len(raw)] for i in range(steps)]
+
+    def generate(self, ctx: LowerLayerContext, include_pads: bool) -> list[str]:
+        scale = ctx.scale
+        dna = ctx.dna
+        seed = ctx.seed
+        degree = ctx.current_degree
+
+        onset_density = (
+            seed.onset_density if seed
+            else dna.get("onset_density_target", 0.4)
+        )
+        tidal_slow = dna.get("tidal_slow", 4)
+
+        # 深度: onset_density 高いほど複雑 (1〜4)
+        depth = max(1, min(4, round(1 + onset_density * 4)))
+
+        rules = (
+            self._RULE_SETS["dense"] if onset_density >= 0.5
+            else self._RULE_SETS["sparse"]
+        )
+        axiom = random.choice(["F", "G"])
+        lstring = self._evolve(axiom, rules, depth)
+        rhythm_16 = self._to_rhythm_pattern(lstring, steps=16)
+        if sum(rhythm_16) == 0:
+            rhythm_16[0] = 1
+
+        rhythm_str = _rhythm_pattern_to_tidal(rhythm_16)
+
+        raw_amp = 0.3 + onset_density * 0.4 + random.gauss(0, 0.03)
+        amp_main = min(0.7, max(0.1, raw_amp))
+        raw_pad = 0.1 + onset_density * 0.2 + random.gauss(0, 0.02)
+        amp_pad = min(0.4, max(0.05, raw_pad))
+        raw_deg = 0.9 - onset_density + random.gauss(0, 0.04)
+        degrade = max(0.05, min(0.95, raw_deg))
+
+        melody_octave = 5 if ctx.arc_phase > 0.6 else 4
+
+        if seed:
+            raw_main = pitch_class_to_freqs(
+                seed.pitch_class_distribution,
+                scale.root, scale.sa_mode,
+                top_n=3, octave=melody_octave,
+            )
+        else:
+            root_hz = _midi_to_hz(melody_octave * 12 + scale.root_semitone)
+            raw_main = [root_hz, root_hz * 1.498]
+
+        chord_hz = _build_diatonic_voicing(degree, scale, octave=3)
+        shifted_main = _apply_degree_shift(raw_main, degree)
+        root_s = scale.root_semitone
+        quantized_main = [
+            _midi_to_hz(quantize(_hz_to_midi(f), root_s, scale.mode))
+            for f in shifted_main if f > 0
+        ]
+        # Layer 5: Melodic Contour — arc_phase で輪郭方向を整形
+        contoured = _shape_melodic_contour(quantized_main[:3], ctx.arc_phase)
+        freq_str = _freqs_to_tidal_str(contoured)
+        chord_str = _freqs_to_tidal_str(chord_hz)
+
+        lines = _build_rhythmic_lines(
+            ctx.synth_a, ctx.synth_b,
+            onset_density, degrade, amp_main, freq_str,
+            tidal_slow=tidal_slow, rhythm_str=rhythm_str,
+        )
+        if include_pads:
+            lines += _build_pad_lines(
+                ctx.synth_a, ctx.synth_b,
+                tidal_slow, amp_pad, chord_str,
+                onset_density=onset_density,
+            )
+            # Layer 6: Articulation — d3/d4 で表情・ミクロダイナミクス
+            lines += _build_expression_lines(
+                ctx.synth_a, ctx.synth_b,
+                tidal_slow, amp_pad, freq_str, ctx.arc_phase,
+            )
+
+        log.debug(
+            "LSystemStrategy: depth=%d axiom=%s pattern=%s hits=%d/16",
+            depth, axiom, lstring[:24], sum(rhythm_16),
+        )
+        return lines
+
+
+# 利用可能なStrategyのレジストリ
+_MIDDLE_STRATEGIES: dict[str, MiddleLayerStrategy] = {
+    "gravity_markov": GravityMarkovStrategy(),
+}
+
+_LOWER_STRATEGIES: dict[str, LowerLayerStrategy] = {
+    "euclid_template": EuclidTemplateStrategy(),
+    "l_system": LSystemStrategy(),
+}
+
+
 # ── メイン生成エンジン ─────────────────────────────────────────────────────
 
 class MusicGenerator:
@@ -347,8 +747,16 @@ class MusicGenerator:
     _SYNTH_A = "matoma_rhythmic_spring"
     _SYNTH_B = "matoma_rhythmic_grain"
 
-    def __init__(self, tidal: TidalController) -> None:
+    def __init__(
+        self,
+        tidal: TidalController,
+        broadcast=None,
+        send_osc=None,
+    ) -> None:
         self._tidal = tidal
+        self._broadcast = broadcast  # async broadcast(dict) → WebSocket全体配信
+        self._send_osc = send_osc   # _send_osc(address, args) → SC OSC送信
+        self._loop: Optional[object] = None  # メインイベントループ（start()時に取得）
         self._clock = GlobalClock()
         self._scene_dna: dict = {}
         self._seed: Optional[SonicAnatomyRecord] = None
@@ -371,6 +779,16 @@ class MusicGenerator:
         self._sa_chord_idx: int = 0
         # SAデータの活動量に基づく3層制御の緩和倍率（1.0=通常、最大8.0=ドローン）
         self._sa_activity_multiplier: float = 1.0
+        # 交換可能なStrategy（実行時に set_middle_strategy / set_lower_strategy で変更可）
+        self._middle_strategy: MiddleLayerStrategy = GravityMarkovStrategy()
+        self._lower_strategy: LowerLayerStrategy = EuclidTemplateStrategy()
+        # 最後に送信したTidalコード（UIでの可視化用）
+        self._last_tidal_lines: list[str] = []
+        # UpperLayerの次のスケール変更まで残り tick 数（UI表示用）
+        self._upper_tick_counter: int = 0
+        self._upper_every: int = 30
+        # ユーザー固定override（Noneの場合はSAやDNAに従う）
+        self._density_override: Optional[float] = None
 
     # ── 公開API ─────────────────────────────────────────────────────────────
 
@@ -378,6 +796,11 @@ class MusicGenerator:
         """生成ループを開始する（既に実行中なら無視）。"""
         if self._running:
             return
+        # メインイベントループを保存（async コンテキストから呼ばれる想定）
+        try:
+            self._loop = asyncio.get_event_loop()
+        except RuntimeError:
+            self._loop = None
         self._running = True
         self._thread = threading.Thread(
             target=self._generation_loop, daemon=True, name="MusicGenerator"
@@ -450,6 +873,167 @@ class MusicGenerator:
             f"harmonic_bars={dna.get('harmonic_bars', 4)}"
         )
 
+    # ── 調性OSC送信 ─────────────────────────────────────────────────────────
+
+    # ドローン用オクターブ（C2 = 65.41Hz、低域ドローンに適した音域）
+    _DRONE_OCTAVE = 2
+
+    def _compute_harm(self) -> dict:
+        """現在のLayer1/2状態からharm辞書を計算する。
+
+        Returns:
+            {root, mode, rootHz, degree, degreeHz}
+            rootHz / degreeHz はドローン用オクターブ（C2≈65Hz基準）のHz値。
+        """
+        with self._lock:
+            scale = self._clock.current_scale
+            degree = self._current_degree
+
+        root_semi = ROOT_TO_SEMITONE.get(scale.root, 0)
+        degree_semi = DEGREE_SEMITONES.get(degree, 0)
+
+        # ドローンオクターブ（MIDI 36 = C2 = 65.41Hz）
+        root_midi = self._DRONE_OCTAVE * 12 + root_semi
+        degree_midi = root_midi + degree_semi
+
+        return {
+            "root":     scale.root,
+            "mode":     scale.mode,
+            "rootHz":   round(_midi_to_hz(root_midi), 3),
+            "degree":   degree,
+            "degreeHz": round(_midi_to_hz(degree_midi), 3),
+        }
+
+    def _send_harm(self) -> None:
+        """SCへ /matoma/harm/update を送信する。
+
+        Layer1（スケール変更）またはLayer2（コード度数変更）後に呼ぶ。
+        SCの~harmが更新され、ドローンとgran_synthのfreqが即座に追従する。
+        """
+        if self._send_osc is None:
+            return
+        h = self._compute_harm()
+        self._send_osc("/matoma/harm/update", [
+            h["root"], h["mode"], h["rootHz"],
+            h["degree"], h["degreeHz"],
+        ])
+        log.info(
+            "harm送信: %s %s %s → rootHz=%.2f degreeHz=%.2f",
+            h["root"], h["mode"], h["degree"], h["rootHz"], h["degreeHz"],
+        )
+
+    def set_root(self, root: str) -> None:
+        """ルート音を即座に変更する（例: "C", "Eb", "G"）。"""
+        mode = self._clock.current_scale.mode
+        self._clock.request_scale_change(Scale(root=root, mode=mode))
+        self._clock.on_cycle_boundary()  # 即座に反映
+        self._send_harm()
+        log.info("UpperLayer override: root=%s", root)
+
+    def set_scale(self, mode: str) -> None:
+        """スケール（モード）を即座に変更する（例: "minor", "dorian"）。"""
+        if mode not in SCALE_INTERVALS:
+            log.warning("未知のスケール: %s", mode)
+            return
+        root = self._clock.current_scale.root
+        self._clock.request_scale_change(Scale(root=root, mode=mode))
+        self._clock.on_cycle_boundary()  # 即座に反映
+        self._send_harm()
+        log.info("UpperLayer override: mode=%s", mode)
+
+    def set_density(self, density: float) -> None:
+        """onset_density を上書きする（0.0〜1.0）。Noneで解除。"""
+        with self._lock:
+            self._density_override = max(0.0, min(1.0, density)) if density is not None else None
+        log.info("LowerLayer density override: %s", self._density_override)
+
+    def get_state(self) -> dict:
+        """UI向けの現在状態スナップショットを返す。"""
+        with self._lock:
+            scale = self._clock.current_scale
+            degree = self._current_degree
+            arc = self._arc_phase
+            bpm = self._bpm
+            bars = self._harmonic_bars
+            secs = self._secs_since_chord_change
+            sa_mult = self._sa_activity_multiplier
+            upper_tick = self._upper_tick_counter
+            upper_every = self._upper_every
+            lines = list(self._last_tidal_lines)
+            density = self._density_override
+            mid_name = type(self._middle_strategy).__name__
+            low_name = type(self._lower_strategy).__name__
+
+        bar_secs = (60.0 / bpm) * 4 if bpm > 0 else 2.0
+        chord_interval = bar_secs * bars * sa_mult
+        chord_remaining = max(0.0, chord_interval - secs)
+
+        tick_interval = 2.0
+        upper_remaining = max(0.0, (upper_every - upper_tick) * tick_interval)
+
+        # harm計算（UI表示用）
+        root_semi = ROOT_TO_SEMITONE.get(scale.root, 0)
+        degree_semi = DEGREE_SEMITONES.get(degree, 0)
+        root_midi = self._DRONE_OCTAVE * 12 + root_semi
+        root_hz = round(_midi_to_hz(root_midi), 2)
+        degree_hz = round(_midi_to_hz(root_midi + degree_semi), 2)
+
+        return {
+            "type": "score_state",
+            "running": self._running,
+            # Layer 1（上位・スケール）
+            "root": scale.root,
+            "mode": scale.mode,
+            "upper_remaining_secs": round(upper_remaining, 1),
+            # Layer 2（中位・コード度数）
+            "degree": degree,
+            "chord_remaining_secs": round(chord_remaining, 1),
+            # harm周波数（SCへの実反映値）
+            "rootHz": root_hz,
+            "degreeHz": degree_hz,
+            # Layer 3（下位・Tidalコード）
+            "tidal_lines": lines,
+            # メタ
+            "arc_phase": round(arc, 2),
+            "density_override": density,
+            "middle_strategy": mid_name,
+            "lower_strategy": low_name,
+        }
+
+    def set_middle_strategy(self, name: str) -> None:
+        """MiddleLayerのアルゴリズムを実行時に切り替える。
+
+        Args:
+            name: 利用可能な戦略名（"gravity_markov" など）
+        """
+        strategy = _MIDDLE_STRATEGIES.get(name)
+        if strategy is None:
+            log.warning(
+                "MiddleLayer strategy 不明: %s (利用可能: %s)",
+                name, list(_MIDDLE_STRATEGIES.keys()),
+            )
+            return
+        with self._lock:
+            self._middle_strategy = strategy
+        log.info("MiddleLayer strategy → %s", name)
+
+    def set_lower_strategy(self, name: str) -> None:
+        """LowerLayerのアルゴリズムを実行時に切り替える。
+
+        Args:
+            name: 利用可能な戦略名（"euclid_template" など）
+        """
+        strategy = _LOWER_STRATEGIES.get(name)
+        if strategy is None:
+            log.warning(
+                "LowerLayer strategy 不明: %s (利用可能: %s)",
+                name, list(_LOWER_STRATEGIES.keys()),
+            )
+            return
+        with self._lock:
+            self._lower_strategy = strategy
+        log.info("LowerLayer strategy → %s", name)
+
     # ── 内部レイヤー処理 ────────────────────────────────────────────────────
 
     def _upper_layer_tick(self) -> None:
@@ -488,140 +1072,45 @@ class MusicGenerator:
             log.info(
                 f"UpperLayer: スケール変更予約 root={new_root} mode={new_mode}"
             )
+            # スケール変更予約と同時にharmを先行送信（ドローン追従を早める）
+            self._send_harm()
 
     def _middle_layer_tick(self) -> None:
-        """MiddleLayer: Gravity+Markov+SAコード進行のブレンドで度数選択（~4-8秒）。
+        """MiddleLayer: 現在の _middle_strategy に委譲してコード度数を選択する（~4-8秒）。
 
-        3つのソースを合成して音楽的に自然かつ偶発的な度数遷移を生成する：
-          - GravityMatrix (40%): シーン性格（tonic/dominant）
-          - Markov遷移  (60%): 現在度数からの音楽的自然遷移
-          - SAコード進行 (+40%ブースト): 元楽曲の引力点
+        デフォルトは GravityMarkovStrategy（Gravity+Markov+SAブレンド）。
+        set_middle_strategy() で実行時に切り替え可能。
         """
         with self._lock:
             dna = self._scene_dna
             current_degree = self._current_degree
-            sa_seq = list(self._sa_chord_sequence)
+            sa_seq = tuple(self._sa_chord_sequence)
             sa_idx = self._sa_chord_idx
+            strategy = self._middle_strategy
 
         if not dna:
             return
 
-        all_degrees = ["I", "II", "III", "IV", "V", "VI", "VII"]
-
-        # Gravity Matrixの重み（全7度数に対して分布、0.0で欠如）
-        gravity_type = dna.get("chord_gravity", "tonic")
-        gravity_map = GRAVITY.get(gravity_type, GRAVITY["tonic"])
-        gravity_raw = {d: gravity_map.get(d, 0.0) for d in all_degrees}
-
-        # Markov遷移重み（現在の度数からの音楽的自然遷移）
-        markov_map = DEGREE_TRANSITIONS.get(current_degree, {})
-        markov_raw = {d: markov_map.get(d, 0.0) for d in all_degrees}
-
-        # 正規化
-        g_total = sum(gravity_raw.values())
-        m_total = sum(markov_raw.values())
-        uniform = 1.0 / len(all_degrees)
-        gw = (
-            {d: gravity_raw[d] / g_total for d in all_degrees}
-            if g_total > 0 else {d: uniform for d in all_degrees}
+        ctx = MiddleLayerContext(
+            dna=dna,
+            current_degree=current_degree,
+            sa_chord_sequence=sa_seq,
+            sa_chord_idx=sa_idx,
         )
-        mw = (
-            {d: markov_raw[d] / m_total for d in all_degrees}
-            if m_total > 0 else {d: uniform for d in all_degrees}
-        )
-
-        # 混合重み（Gravity 40% + Markov 60%）
-        blended = {d: 0.4 * gw[d] + 0.6 * mw[d] for d in all_degrees}
-
-        # SAコード進行の次の度数に +40% ブースト（元楽曲の引力点として使用）
-        sa_degree: str | None = None
-        if sa_seq:
-            sa_degree = sa_seq[sa_idx % len(sa_seq)]
-            if sa_degree in blended:
-                blended[sa_degree] *= 1.4
-
-        # 正規化して確率的選択
-        total = sum(blended.values())
-        weights = [blended[d] / total for d in all_degrees]
-        chosen = random.choices(all_degrees, weights=weights, k=1)[0]
-
-        new_idx = (sa_idx + 1) % len(sa_seq) if sa_seq else 0
+        result = strategy.tick(ctx)
         with self._lock:
-            self._current_degree = chosen
+            self._current_degree = result.degree
             self._pad_dirty = True
-            self._sa_chord_idx = new_idx
-        log.debug(
-            f"MiddleLayer: コード度数 → {chosen} "
-            f"(SA引力点={sa_degree or 'none'}, Markov元={current_degree})"
-        )
-
-    # ── Tidalコード生成 ──────────────────────────────────────────────────────
-
-    def _build_rhythmic_lines(
-        self,
-        scale: Scale,
-        density: float,
-        degrade: float,
-        amp_main: float,
-        freq_str: str,
-        tidal_slow: int = 4,
-        rhythm_str: Optional[str] = None,
-    ) -> list[str]:
-        """d1 / d2 のリズム系Tidalコードを生成する。
-
-        SAリズムパターンがある場合は struct を使い、ない場合は euclid を使う。
-        d2 の slow はシーンの tidal_slow に連動する（固定値 3 を廃止）。
-        """
-        hits, steps = _select_euclid(density)
-        # d2 は d5 の半分速度（シーン連動）
-        d2_slow = max(1, tidal_slow // 2)
-        d2_degrade = min(degrade + 0.15, 0.92)
-        d2_amp = amp_main * 0.6
-
-        # SAリズムパターン → struct、なければ euclid
-        if rhythm_str:
-            d1_rhythm = f"struct {rhythm_str}"
-        else:
-            d1_rhythm = f"euclid {hits} {steps}"
-
-        return [
-            f'd1 $ degradeBy {degrade:.2f} $ {d1_rhythm} '
-            f'$ s "{self._SYNTH_A}" # freq {freq_str} # amp {amp_main:.2f}',
-            f'd2 $ slow {d2_slow} $ degradeBy {d2_degrade:.2f} '
-            f'$ s "{self._SYNTH_B}" # freq {freq_str} # amp {d2_amp:.2f}',
-        ]
-
-    def _build_pad_lines(
-        self,
-        tidal_slow: int,
-        amp_pad: float,
-        chord_str: str,
-        onset_density: float = 0.4,
-    ) -> list[str]:
-        """d5 / d6 のスロー系（パッド）Tidalコードを生成する。
-
-        d6 の degradeBy を onset_density に連動させる。
-        密なシーン（density 高）→ 音符を間引く量を減らす（密度を維持）
-        疎なシーン（density 低）→ 音符を間引く量を増やす（余白を増やす）
-        """
-        very_slow = tidal_slow * 2
-        d6_amp = amp_pad * 0.7
-        # density=0 → degrade=0.8（多く間引く）、density=1 → degrade=0.4（あまり間引かない）
-        d6_degrade = max(0.2, min(0.8, 0.8 - onset_density * 0.4))
-
-        return [
-            f'd5 $ slow {tidal_slow} $ s "{self._SYNTH_A}" '
-            f'# freq {chord_str} # amp {amp_pad:.2f}',
-            f'd6 $ degradeBy {d6_degrade:.2f} $ slow {very_slow} '
-            f'$ s "{self._SYNTH_B}" # freq {chord_str} # amp {d6_amp:.2f}',
-        ]
+            self._sa_chord_idx = result.sa_chord_idx
+        # コード度数変更 → 全シンセのpitchをharm経由で即更新
+        self._send_harm()
 
     def _generate_tidal_code(self, include_pads: bool = True) -> list[str]:
         """現在の状態からTidalコード行リストを生成する。
 
-        ScaleQuantizerで全音程をスケール内に補正する。
-        Gaussianノイズで amp/degrade に微変動を加え、同一SAデータでも
-        毎tick異なるパターンが生成されるようにする（偶発的生成の担保）。
+        現在の _lower_strategy に委譲する。
+        デフォルトは EuclidTemplateStrategy（euclid/struct + Gaussianノイズ）。
+        set_lower_strategy() で実行時に切り替え可能。
         """
         with self._lock:
             scale = self._clock.current_scale
@@ -629,72 +1118,26 @@ class MusicGenerator:
             seed = self._seed
             degree = self._current_degree
             arc_phase = self._arc_phase
+            strategy = self._lower_strategy
+            density_override = self._density_override
 
         if not dna:
             return []
 
-        onset_density = (
-            seed.onset_density if seed
-            else dna.get("onset_density_target", 0.4)
+        # density_override が設定されていれば DNA の onset_density_target を上書き
+        if density_override is not None:
+            dna["onset_density_target"] = density_override
+
+        ctx = LowerLayerContext(
+            scale=scale,
+            dna=dna,
+            seed=seed,
+            current_degree=degree,
+            arc_phase=arc_phase,
+            synth_a=self._SYNTH_A,
+            synth_b=self._SYNTH_B,
         )
-        tidal_slow = dna.get("tidal_slow", 4)
-
-        # Gaussianノイズで微変動（σ=0.03）→ 同じSAデータでも毎tick異なる値
-        amp_main = min(0.7, max(0.1,
-            0.3 + onset_density * 0.4 + random.gauss(0, 0.03)
-        ))
-        amp_pad = min(0.4, max(0.05,
-            0.1 + onset_density * 0.2 + random.gauss(0, 0.02)
-        ))
-        degrade = max(0.05, min(0.95,
-            0.9 - onset_density + random.gauss(0, 0.04)
-        ))
-
-        # アークフェーズに応じて d1/d2 のオクターブを変える（旋律輪郭制御）
-        melody_octave = 5 if arc_phase > 0.6 else 4
-
-        # 音程生成（SAデータまたはフォールバック）
-        if seed:
-            raw_main = pitch_class_to_freqs(
-                seed.pitch_class_distribution,
-                scale.root, scale.sa_mode,
-                top_n=3, octave=melody_octave,
-            )
-        else:
-            root_hz = _midi_to_hz(melody_octave * 12 + scale.root_semitone)
-            raw_main = [root_hz, root_hz * 1.498]  # 完全5度
-
-        # d5/d6 パッド: ダイアトニック3和音ボイシング（根音+3度+5度）
-        chord_hz = _build_diatonic_voicing(degree, scale, octave=3)
-
-        # d1/d2 旋律: 度数シフト → ScaleQuantize
-        shifted_main = _apply_degree_shift(raw_main, degree)
-        quantized_main = [
-            _midi_to_hz(
-                quantize(_hz_to_midi(f), scale.root_semitone, scale.mode)
-            )
-            for f in shifted_main if f > 0
-        ]
-
-        freq_str = _freqs_to_tidal_str(quantized_main[:3])
-        chord_str = _freqs_to_tidal_str(chord_hz)
-
-        # SAリズムパターン → Tidal struct 文字列（なければ euclid にフォールバック）
-        rhythm_str: Optional[str] = None
-        if seed and seed.rhythm_pattern:
-            rhythm_str = _rhythm_pattern_to_tidal(seed.rhythm_pattern)
-
-        lines = self._build_rhythmic_lines(
-            scale, onset_density, degrade, amp_main, freq_str,
-            tidal_slow=tidal_slow,
-            rhythm_str=rhythm_str,
-        )
-        if include_pads:
-            lines += self._build_pad_lines(
-                tidal_slow, amp_pad, chord_str,
-                onset_density=onset_density,
-            )
-        return lines
+        return strategy.generate(ctx, include_pads)
 
     # ── 生成ループ ───────────────────────────────────────────────────────────
 
@@ -707,6 +1150,7 @@ class MusicGenerator:
         """
         tick_interval = 2.0
         upper_every = 30
+        self._upper_every = upper_every
         tick = 0
 
         # 最初のパッド送信は確実に行う
@@ -724,6 +1168,8 @@ class MusicGenerator:
                     self._pad_dirty = True
 
             # UpperLayer チェック
+            with self._lock:
+                self._upper_tick_counter = tick % upper_every
             if tick > 0 and tick % upper_every == 0:
                 self._upper_layer_tick()
 
@@ -766,9 +1212,22 @@ class MusicGenerator:
             lines = self._generate_tidal_code(include_pads=include_pads)
             if lines:
                 self._tidal.evaluate("\n".join(lines))
+                with self._lock:
+                    self._last_tidal_lines = list(lines)
                 log.debug(
                     f"Tidal 送信 (tick={tick}, pads={include_pads}, "
                     f"arc={self._arc_phase:.2f}):\n" + "\n".join(lines)
                 )
+
+            # UI向けに現在状態をブロードキャスト（スレッドセーフ）
+            if self._broadcast is not None and self._loop is not None:
+                try:
+                    state = self.get_state()
+                    asyncio.run_coroutine_threadsafe(
+                        self._broadcast(state),
+                        self._loop,
+                    )
+                except Exception as e:
+                    log.debug("broadcast エラー（無視）: %s", e)
 
             tick += 1

@@ -1,3 +1,8 @@
+[tool.pytest.ini_options]
+markers = [
+    "integration: SuperCollider 実機が起動している状態でのみ実行する統合テスト",
+]
+
 [tool.ruff]
 line-length = 79
 

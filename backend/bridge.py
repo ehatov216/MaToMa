@@ -29,22 +29,15 @@ from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import AsyncIOOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
 
-from autonomous import AutonomousMode
 from musical_control import MusicalControl
-from sonic_anatomy_bridge import load_record, generate_tidal_seed, seed_to_dict
 from three_layer_controller import ThreeLayerController
-from param_mapper import (
-    chaos_to_internal,
-    density_to_internal,
-    tension_to_internal,
-    trig_prob_from_density,
-)
 from scenes import get_scene, scene_to_osc_messages, SCENE_DNA
 from music_generator import MusicGenerator
 from sequencer import TuringSequencer
 from tidal_controller import TidalController
 from tidal_patterns import get_preset, PRESETS
 
+PATTERNS_SA_DIR = Path(__file__).resolve().parent.parent / "patterns" / "sa"
 
 
 def _coreaudio_lib():
@@ -154,6 +147,7 @@ OSC_LISTEN_HOST = "127.0.0.1"
 OSC_LISTEN_PORT = 9000   # SCからPythonへ（このポートで待ち受ける）
 SC_HOST = "127.0.0.1"
 SC_PORT = 57200  # PythonからSCへ（MaToMa専用ポート）
+SC_SYNTH_PORT = 57110  # scsynth ネイティブポート（/g_queryTree 等）
 TIDAL_CTRL_PORT = 6010   # Tidal Control Channel（melody_note等を /ctrl で送る）
 WS_HOST = "localhost"
 WS_PORT = 8765   # ブラウザとのWebSocket
@@ -171,14 +165,20 @@ connected_clients: set[websockets.WebSocketServerProtocol] = set()
 # SCへメッセージを送るクライアント
 sc_client = SimpleUDPClient(SC_HOST, SC_PORT)
 
+# scsynth ネイティブポートへのクライアント（/g_queryTree 等）
+sc_synth_client = SimpleUDPClient(SC_HOST, SC_SYNTH_PORT)
+
 # Tidal Control Channel クライアント（melody_note 等を /ctrl で送る）
 tidal_ctrl_client = SimpleUDPClient(SC_HOST, TIDAL_CTRL_PORT)
 
-# 自律モード（broadcast は後で関数参照として渡す）
-autonomous: Optional[AutonomousMode] = None
+# SC ノードツリーのキャッシュ
+_sc_node_tree: dict | None = None
 
 # 3レイヤー制御コントローラー（Upper=Markov / Middle=BoundedWalk / Lower=Dejavu）
 controller: Optional[ThreeLayerController] = None
+
+# Glitch Synth パラメーター状態（Studio Mode の Sparkline 用）
+_glitch_state: dict[str, dict[str, float]] = {}
 
 # Tidal Cycles コントローラー
 tidal: Optional[TidalController] = None
@@ -209,6 +209,16 @@ def _send_osc(address: str, args: list) -> None:
     送信内容は WebSocket 経由でブラウザの Studio Mode に表示される。
     """
     sc_client.send_message(address, args)
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(broadcast({
+            "type": "osc_sent",
+            "address": address,
+            "args": args if isinstance(args, list) else list(args),
+            "ts": time.time(),
+        }))
+    except RuntimeError:
+        pass  # イベントループが未起動の場合は無視
 
 
 def _send_tidal_ctrl(key: str, value: float) -> None:
@@ -217,13 +227,14 @@ def _send_tidal_ctrl(key: str, value: float) -> None:
     Tidal 側で cI 0 "melody_note" のように参照できる。
     ThreeLayerController の melody レイヤーから呼ばれる。
     """
-    tidal_ctrl_client.send_message("/ctrl", [key, float(value)])
+    tidal_ctrl_args = [key, float(value)]
+    tidal_ctrl_client.send_message("/ctrl", tidal_ctrl_args)
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(broadcast({
             "type": "osc_sent",
-            "address": address,
-            "args": args if isinstance(args, list) else list(args),
+            "address": "/ctrl",
+            "args": tidal_ctrl_args,
             "ts": time.time(),
         }))
     except RuntimeError:
@@ -363,9 +374,49 @@ def on_osc_message(address: str, *args) -> None:
         log.error(f"on_osc_message エラー: {address} {e}")
 
 
+def _parse_node_tree(args: list) -> dict | None:
+    """scsynth の /g_queryTree.reply フラット配列をネスト辞書に変換する。
+
+    フォーマット: [flag, nodeID, numChildren, (synthDefName if numChildren<0), ...]
+    flag=1 のときはコントロール情報（numControls, name, val...）も含まれる。
+    """
+    if len(args) < 3:
+        return None
+    flag = int(args[0])
+    pos = [1]
+
+    def parse() -> dict | None:
+        if pos[0] + 1 >= len(args):
+            return None
+        node_id = int(args[pos[0]])
+        num_children = int(args[pos[0] + 1])
+        pos[0] += 2
+        if num_children < 0:  # Synth
+            if pos[0] >= len(args):
+                return None
+            synth_def = str(args[pos[0]])
+            pos[0] += 1
+            if flag == 1 and pos[0] < len(args):
+                num_controls = int(args[pos[0]])
+                pos[0] += 1 + num_controls * 2
+            return {"id": node_id, "type": "synth", "def": synth_def}
+        else:  # Group
+            children = []
+            for _ in range(num_children):
+                child = parse()
+                if child is not None:
+                    children.append(child)
+            return {"id": node_id, "type": "group", "children": children}
+
+    try:
+        return parse()
+    except (IndexError, ValueError, TypeError):
+        return None
+
+
 def _handle_osc_message(address: str, *args) -> None:
     """on_osc_message の実処理（例外はon_osc_message側でキャッチ）。"""
-    global sc_ready
+    global sc_ready, _sc_node_tree
 
     if address == "/matoma/audio/devices":
         # SC からの音声デバイスリストは日本語名が途切れるため、
@@ -481,6 +532,15 @@ def _handle_osc_message(address: str, *args) -> None:
         )
         return
 
+    if address == "/g_queryTree.reply":
+        tree = _parse_node_tree(list(args))
+        if tree is not None:
+            _sc_node_tree = tree
+            asyncio.get_running_loop().create_task(
+                broadcast({"type": "sc_node_tree", "tree": tree})
+            )
+        return
+
     log.info(f"OSC受信: {address}  args={args}")
     asyncio.get_running_loop().create_task(
         broadcast({"address": address, "args": list(args)})
@@ -523,9 +583,32 @@ async def ws_handler(websocket) -> None:
                     if scene:
                         for osc in scene_to_osc_messages(scene):
                             sc_client.send_message(osc["address"], osc["args"])
-                        # コントローラーの引力点をシーンに合わせて更新する
+                        # 共通スケール制約: シーンのスケール情報をSCへ送信
+                        scale_info = scene.get("scale")
+                        if scale_info:
+                            sc_client.send_message(
+                                "/matoma/scale",
+                                [scale_info["name"], float(scale_info["root_freq"])],
+                            )
+                            log.info(
+                                f"スケール変更: {scale_info['name']} "
+                                f"(root={scale_info['root_freq']} Hz)"
+                            )
+                        # コードプログレッション: シーン切り替え時に自動開始
+                        chord_prog_info = scene.get("chord_prog")
+                        if chord_prog_info:
+                            sc_client.send_message(
+                                "/matoma/chordprog/start",
+                                [scene_name, float(chord_prog_info.get("bars", 4))],
+                            )
+                            log.info(
+                                f"コード進行開始: {scene_name} "
+                                f"({chord_prog_info.get('bars', 4)}小節/コード)"
+                            )
+                        # コントローラーの引力点・Markov状態をシーンに合わせて更新する
                         if controller is not None:
                             controller.set_scene(scene)
+                            controller.set_markov_state_from_scene(scene_name)
                         if music_gen is not None and scene_name in SCENE_DNA:
                             music_gen.set_scene(SCENE_DNA[scene_name])
                         await broadcast({"type": "scene_changed", "scene": scene})
@@ -544,8 +627,6 @@ async def ws_handler(websocket) -> None:
                 elif address == "/matoma/all/stop":
                     if controller is not None:
                         controller.stop()
-                    if autonomous is not None:
-                        autonomous.stop()
                     sc_client.send_message("/matoma/all/stop", [])
                     log.info("全停止")
                     await broadcast({"type": "all_stopped"})
@@ -553,8 +634,6 @@ async def ws_handler(websocket) -> None:
                 elif address == "/matoma/all/restart":
                     if controller is not None:
                         controller.stop()
-                    if autonomous is not None:
-                        autonomous.stop()
                     sc_client.send_message("/matoma/all/restart", [])
                     log.info("再セットアップ")
                     await broadcast({"type": "restarting"})
@@ -620,6 +699,14 @@ async def ws_handler(websocket) -> None:
                         await broadcast({"type": "markov_state", "state": controller.get_markov_state()})
                     log.info(f"Markov interval: {args[0] if args else '?'}")
 
+                elif address == "/matoma/markov/set_state":
+                    # 状態を強制切替（フロントエンドのMarkovボタン）
+                    if controller is not None and args:
+                        state_name = str(args[0])
+                        controller._upper.force_state(state_name)
+                        await broadcast({"type": "markov_state", "state": controller.get_markov_state()})
+                    log.info(f"Markov force_state: {args[0] if args else '?'}")
+
                 elif address == "/matoma/markov/state":
                     # フロントエンドからのポーリング
                     if controller is not None:
@@ -627,13 +714,19 @@ async def ws_handler(websocket) -> None:
 
                 # ── レイヤーモデル選択 ────────────────────────────────────
                 elif address == "/matoma/layer/middle/model":
-                    if controller is not None and args:
-                        controller.set_middle_model(str(args[0]))
+                    if args:
+                        if controller is not None:
+                            controller.set_middle_model(str(args[0]))
+                        if music_gen is not None:
+                            music_gen.set_middle_strategy(str(args[0]))
                         log.info(f"middle model → {args[0]}")
 
                 elif address == "/matoma/layer/lower/model":
-                    if controller is not None and args:
-                        controller.set_lower_model(str(args[0]))
+                    if args:
+                        if controller is not None:
+                            controller.set_lower_model(str(args[0]))
+                        if music_gen is not None:
+                            music_gen.set_lower_strategy(str(args[0]))
                         log.info(f"lower model → {args[0]}")
 
                 elif address == "/matoma/layer/middle/chaos":
@@ -647,44 +740,6 @@ async def ws_handler(websocket) -> None:
                     if controller is not None and args:
                         controller.set_lower_chaos(float(args[0]))
                         log.info(f"lower chaos ratio → {args[0]}")
-
-                elif address.startswith("/matoma/autonomous/"):
-                    # 自律モードの制御
-                    if autonomous is None:
-                        log.warning("自律モード未初期化")
-                    else:
-                        sub = address[len("/matoma/autonomous/"):]
-                        if sub == "start":
-                            autonomous.start()
-                            log.info("自律モード開始")
-                        elif sub == "stop":
-                            autonomous.stop()
-                            log.info("自律モード停止")
-                        elif sub == "mode" and args:
-                            autonomous.set_mode(str(args[0]))
-                            log.info(f"自律モード変更: {args[0]}")
-                        elif sub == "speed" and args:
-                            autonomous.set_speed(float(args[0]))
-                            log.info(f"自律モード速度: {args[0]}")
-                        elif sub == "target" and len(args) >= 2:
-                            autonomous.set_target(str(args[0]), float(args[1]))
-                            log.info(f"目標値設定: {args[0]} = {args[1]}")
-                        elif sub == "tidal_auto" and args:
-                            enabled = bool(args[0])
-                            autonomous.set_tidal_auto(enabled)
-                            log.info(f"Tidal自律モード: {'ON' if enabled else 'OFF'}")
-                        elif sub == "progression" and args:
-                            autonomous.set_progression(str(args[0]))
-                            log.info(f"コード進行変更: {args[0]}")
-                        elif sub == "trig_prob" and args:
-                            autonomous.set_trig_prob(float(args[0]))
-                            log.info(f"TRIG確率: {args[0]}")
-                        elif sub == "dejavu_prob" and args:
-                            autonomous.set_dejavu_prob(float(args[0]))
-                            log.info(f"Dejavu確率: {args[0]}")
-                        elif sub == "dejavu_len" and args:
-                            autonomous.set_dejavu_len(int(args[0]))
-                            log.info(f"Dejavu長さ: {args[0]}")
 
                 elif address == "/matoma/audio/get_devices":
                     # デバイスリストは Python 側で取得（SC OSC 経由では名前が途切れるため）
@@ -717,8 +772,52 @@ async def ws_handler(websocket) -> None:
                     })
                     asyncio.create_task(start_sc())
 
-                elif address.startswith("/matoma/sonic_anatomy/"):
-                    await _handle_sonic_anatomy(address, args, websocket)
+                # ── SC サーバー制御 ──────────────────────────────────────
+                elif address == "/matoma/sc/start":
+                    await broadcast({"type": "sc_booting", "message": "SC起動中..."})
+                    asyncio.create_task(start_sc())
+                    log.info("SC start要求")
+
+                elif address == "/matoma/sc/stop":
+                    global sc_process, sc_ready
+                    sc_ready = False
+                    subprocess.run(["pkill", "-f", "sclang"], capture_output=True)
+                    subprocess.run(["pkill", "-f", "scsynth"], capture_output=True)
+                    if sc_process is not None:
+                        try:
+                            sc_process.terminate()
+                        except Exception:
+                            pass
+                        sc_process = None
+                    await broadcast({"type": "sc_status", "ready": False})
+                    log.info("SC stop要求")
+
+                elif address == "/matoma/sc/reboot":
+                    await broadcast({"type": "sc_booting", "message": "SCリブート中..."})
+                    asyncio.create_task(start_sc())
+                    log.info("SC reboot要求")
+
+                elif address == "/matoma/sc/free_all":
+                    # scsynth に直接 /g_freeAll を送って全Synthを解放
+                    try:
+                        sc_synth_client.send_message("/g_freeAll", [0])
+                        log.info("SC free_all: /g_freeAll 0 送信")
+                    except Exception as e:
+                        log.warning(f"SC free_all失敗: {e}")
+
+                elif address == "/matoma/sc/query_tree":
+                    # フロントエンドからの手動ツリー更新要求
+                    if sc_ready:
+                        try:
+                            sc_synth_client.send_message("/g_queryTree", [0, 0])
+                        except Exception:
+                            pass
+
+                elif address.startswith("/matoma/sa_pattern/"):
+                    await _handle_sa_pattern(address, args, websocket)
+
+                elif address.startswith("/matoma/music_gen/"):
+                    await _handle_music_gen(address, args, websocket)
 
                 elif address.startswith("/matoma/tidal/"):
                     await _handle_tidal(address, args, websocket)
@@ -734,9 +833,6 @@ async def ws_handler(websocket) -> None:
 
                 elif address.startswith("/matoma/seq/"):
                     await _handle_seq(address, args, websocket)
-
-                elif address.startswith("/matoma/flute/"):
-                    await _handle_flute(address, args, websocket)
 
                 elif address == "/matoma/energy/set" and args:
                     sc_client.send_message(address, args)
@@ -755,20 +851,19 @@ async def ws_handler(websocket) -> None:
                     log.info(f"MASTER amp: {amp}")
 
                 elif address.startswith("/matoma/spectral/"):
-                    # スペクトルシンセはそのままSCへ転送する
-                    sc_client.send_message(address, args)
+                    # スペクトルシンセはそのままSCへ転送する（osc_sentもブロードキャスト）
+                    _send_osc(address, args)
                     log.info(f"Spectral SCへ転送: {address}  args={args}")
 
                 else:
-                    # 手動スライダー操作時に自律モードの現在値を同期する
-                    if autonomous is not None:
-                        if address == "/matoma/param" and len(args) >= 2:
-                            autonomous.sync_current(str(args[0]), float(args[1]))
-                        elif address == "/matoma/drone/param" and len(args) >= 2:
-                            autonomous.sync_current(
-                                "drone_" + str(args[0]), float(args[1])
-                            )
-                    sc_client.send_message(address, args)
+                    # glitch synth 等、その他のアドレスはSCへ転送しつつosc_sentをブロードキャスト
+                    _send_osc(address, args)
+                    # glitch synth のパラメーター変化を Studio Mode 用に記録
+                    if address.startswith("/matoma/glitch/") and address.endswith("/param") and len(args) >= 2:
+                        src = address.split("/")[3]  # gendy / chaos / burst
+                        if src not in _glitch_state:
+                            _glitch_state[src] = {}
+                        _glitch_state[src][str(args[0])] = float(args[1])
                     log.info(f"SCへ転送: {address}  args={args}")
             except json.JSONDecodeError:
                 log.warning("不正なJSONを受信しました")
@@ -781,93 +876,168 @@ async def ws_handler(websocket) -> None:
         log.info(f"ブラウザ切断  残={len(connected_clients)}")
 
 
-# Sonic Anatomy の状態（最後に生成したシードを保持）
-_sonic_anatomy_state: dict = {}
+# SAパターン（最後にロードしたパターンをメモリに保持）
+_sa_pattern_state: dict = {}
 
 
-async def _handle_sonic_anatomy(address: str, args: list, websocket) -> None:
-    """Sonic Anatomy ブリッジ関連の WebSocket メッセージを処理する。
+async def _handle_sa_pattern(address: str, args: list, websocket) -> None:
+    """SAパターンファイル（patterns/sa/*.json）を使う WebSocket ハンドラ。
 
-    /matoma/sonic_anatomy/load          : ランダムにレコードを読んでシードを生成
-    /matoma/sonic_anatomy/load/<track_id> : 指定 track_id のシードを生成
-    /matoma/sonic_anatomy/apply         : 最後に生成したシードを Tidal に適用
-    /matoma/sonic_anatomy/apply_rhythm  : リズムラインのみ適用
-    /matoma/sonic_anatomy/apply_harmony : ハーモニーラインのみ適用
+    /matoma/sa_pattern/catalog        : patterns/sa/ 内の JSON 一覧を返す
+    /matoma/sa_pattern/load/<id>      : patterns/sa/<id>.json を読んで返す
+    /matoma/sa_pattern/apply          : 最後にロードしたパターンを全適用
+    /matoma/sa_pattern/apply_rhythm   : リズムラインのみ適用
+    /matoma/sa_pattern/apply_harmony  : ハーモニーラインのみ適用
     """
-    sub = address[len("/matoma/sonic_anatomy/"):]
+    sub = address[len("/matoma/sa_pattern/"):]
 
-    if sub.startswith("load"):
-        # パス残り部分が track_id になる（例: load/250a26eaf38e84db）
-        track_id = sub[len("load/"):].strip() if "/" in sub else None
-        record = await asyncio.get_running_loop().run_in_executor(
-            None, load_record, track_id or None
-        )
-        if record is None:
+    if sub == "catalog":
+        entries = []
+        for p in sorted(PATTERNS_SA_DIR.glob("*.json")):
+            try:
+                data = json.loads(p.read_text())
+                entries.append({
+                    "id": data.get("id", p.stem),
+                    "name": data.get("name", p.stem),
+                    "bpm": data.get("bpm", 0),
+                    "key": data.get("key", "?"),
+                    "density": data.get("density", 0),
+                })
+            except Exception:
+                pass
+        await websocket.send(json.dumps({
+            "type": "sa_pattern_catalog",
+            "patterns": entries,
+        }))
+        log.info(f"SA カタログ送信: {len(entries)} 件")
+
+    elif sub.startswith("load/"):
+        pattern_id = sub[len("load/"):].strip()
+        path = PATTERNS_SA_DIR / f"{pattern_id}.json"
+        if not path.exists():
             await websocket.send(json.dumps({
                 "type": "sonic_anatomy_error",
-                "message": "レコードが見つかりませんでした",
+                "message": f"パターンが見つかりません: {pattern_id}",
             }))
             return
-
-        seed = generate_tidal_seed(record)
-        # グローバルに保持（apply コマンドで使う）
-        _sonic_anatomy_state["last_seed"] = seed
-        payload = seed_to_dict(seed)
-        log.info(
-            f"SA シード生成: track={record.track_id} bpm={record.bpm:.1f}"
-            f" density={record.onset_density:.2f} key={record.key_root}{record.key_mode}"
-        )
-        await broadcast(payload)
+        data = json.loads(path.read_text())
+        _sa_pattern_state["loaded"] = data
+        await broadcast({
+            "type": "sa_pattern_loaded",
+            "id": data.get("id"),
+            "name": data.get("name"),
+            "bpm": data.get("bpm"),
+            "key": data.get("key"),
+            "density": data.get("density"),
+            "rhythm_lines": data.get("rhythm_lines", []),
+            "harmony_lines": data.get("harmony_lines", []),
+        })
+        log.info(f"SA パターンロード: {pattern_id}")
 
     elif sub == "apply":
-        seed = _sonic_anatomy_state.get("last_seed")
-        if seed is None:
+        pattern = _sa_pattern_state.get("loaded")
+        if pattern is None:
             await websocket.send(json.dumps({
                 "type": "sonic_anatomy_error",
-                "message": "先に load してください",
+                "message": "先にパターンをロードしてください",
             }))
             return
-        await _apply_seed(seed, rhythm=True, harmony=True)
+        await _apply_sa_pattern(pattern, rhythm=True, harmony=True)
 
     elif sub == "apply_rhythm":
-        seed = _sonic_anatomy_state.get("last_seed")
-        if seed is not None:
-            await _apply_seed(seed, rhythm=True, harmony=False)
+        pattern = _sa_pattern_state.get("loaded")
+        if pattern is not None:
+            await _apply_sa_pattern(pattern, rhythm=True, harmony=False)
 
     elif sub == "apply_harmony":
-        seed = _sonic_anatomy_state.get("last_seed")
-        if seed is not None:
-            await _apply_seed(seed, rhythm=False, harmony=True)
+        pattern = _sa_pattern_state.get("loaded")
+        if pattern is not None:
+            await _apply_sa_pattern(pattern, rhythm=False, harmony=True)
 
 
-async def _apply_seed(seed, *, rhythm: bool, harmony: bool) -> None:
-    """TidalSeed を実際に tidal.evaluate() / set_tempo() で適用する。"""
+async def _apply_sa_pattern(pattern: dict, *, rhythm: bool, harmony: bool) -> None:
+    """SAパターン dict を Tidal に適用する。"""
     if tidal is None:
-        log.warning("TidalController 未初期化 — SA シードを適用できません")
+        log.warning("TidalController 未初期化 — SA パターンを適用できません")
         return
 
-    # MusicGenerator にも SA シードを渡す（スケール・音程・密度の初期化）
-    if music_gen is not None:
-        music_gen.set_seed(seed)
+    bpm = pattern.get("bpm", 120.0)
+    tidal.set_tempo(bpm)
 
-    tidal.set_tempo(seed.bpm)
     lines = []
     if rhythm:
-        lines.extend(seed.rhythm_lines)
+        lines.extend(pattern.get("rhythm_lines", []))
     if harmony:
-        lines.extend(seed.harmony_lines)
+        lines.extend(pattern.get("harmony_lines", []))
 
     mode = "all" if rhythm and harmony else "rhythm" if rhythm else "harmony"
     code = "\n".join(lines)
     tidal.evaluate(code)
-    log.info(f"SA シード適用: mode={mode} {len(lines)} ライン")
+    log.info(f"SA パターン適用: mode={mode} bpm={bpm} {len(lines)} ライン")
     await broadcast({
         "type": "sonic_anatomy_applied",
         "mode": mode,
-        "bpm": seed.bpm,
+        "bpm": bpm,
         "code": code,
     })
 
+
+
+async def _handle_music_gen(address: str, args: list, websocket) -> None:
+    """MusicGenerator制御のWebSocketメッセージを処理する。
+
+    /matoma/music_gen/start        → 生成ループ開始
+    /matoma/music_gen/stop         → 生成ループ停止
+    /matoma/music_gen/state        → 現在状態をブロードキャスト
+    /matoma/music_gen/set_root     → [root: str] ルート音変更 (例: "C", "Eb")
+    /matoma/music_gen/set_scale    → [mode: str] スケール変更 (例: "minor", "dorian")
+    /matoma/music_gen/set_density  → [val: float 0-1] onset_density上書き
+    /matoma/music_gen/set_middle   → [name: str] Middle strategy名
+    /matoma/music_gen/set_lower    → [name: str] Lower strategy名
+    """
+    if music_gen is None:
+        log.warning("MusicGenerator未初期化")
+        return
+    sub = address[len("/matoma/music_gen/"):]
+
+    if sub == "start":
+        if tidal is not None and not tidal.is_running:
+            await asyncio.get_running_loop().run_in_executor(None, tidal.start)
+        music_gen.start()
+        await broadcast({"type": "music_gen_status", "running": True})
+        log.info("MusicGenerator: start")
+
+    elif sub == "stop":
+        music_gen.stop()
+        if tidal is not None:
+            tidal.hush()
+        await broadcast({"type": "music_gen_status", "running": False})
+        log.info("MusicGenerator: stop")
+
+    elif sub == "state":
+        state = music_gen.get_state()
+        await broadcast(state)
+
+    elif sub == "set_root" and args:
+        music_gen.set_root(str(args[0]))
+        await broadcast(music_gen.get_state())
+
+    elif sub == "set_scale" and args:
+        music_gen.set_scale(str(args[0]))
+        await broadcast(music_gen.get_state())
+
+    elif sub == "set_density" and args:
+        val = args[0]
+        music_gen.set_density(float(val) if val != "none" else None)
+        await broadcast(music_gen.get_state())
+
+    elif sub == "set_middle" and args:
+        music_gen.set_middle_strategy(str(args[0]))
+        await broadcast(music_gen.get_state())
+
+    elif sub == "set_lower" and args:
+        music_gen.set_lower_strategy(str(args[0]))
+        await broadcast(music_gen.get_state())
 
 
 async def _handle_tidal(address: str, args: list, websocket) -> None:
@@ -1017,34 +1187,6 @@ async def _handle_seq(address: str, args: list, websocket) -> None:
             json.dumps({"type": "seq_state", "state": sequencer.get_state()})
         )
 
-
-async def _handle_flute(address: str, args: list, _websocket) -> None:
-    """3本の笛（CHAOS/DENSITY/TENSION）をOSC展開してSCへ送信する。"""
-    sub = address[len("/matoma/flute/"):]
-    if not args:
-        return
-    value = float(args[0])
-
-    if sub == "chaos":
-        for osc_addr, osc_args in chaos_to_internal(value):
-            sc_client.send_message(osc_addr, osc_args)
-        log.info(f"Flute CHAOS={value:.2f}")
-
-    elif sub == "density":
-        for osc_addr, osc_args in density_to_internal(value):
-            sc_client.send_message(osc_addr, osc_args)
-        if sequencer is not None:
-            sequencer.set_trig_prob(trig_prob_from_density(value))
-        log.info(f"Flute DENSITY={value:.2f}")
-
-    elif sub == "tension":
-        for osc_addr, osc_args in tension_to_internal(value):
-            sc_client.send_message(osc_addr, osc_args)
-        log.info(f"Flute TENSION={value:.2f}")
-
-    elif sub == "brightness":
-        sc_client.send_message("/matoma/drone/param", ["brightness", value])
-        log.info(f"Flute BRIGHTNESS={value:.2f}")
 
 
 async def _convert_mp3_to_wav(src_path: str) -> str | None:
@@ -1204,17 +1346,67 @@ def _release_pid_lock() -> None:
         pass
 
 
+async def _periodic_state_broadcast() -> None:
+    """2秒ごとにコントローラーの状態をブラウザへ配信する（Studio Mode 用）。"""
+    _node_tree_counter = 0
+    while True:
+        await asyncio.sleep(2.0)
+
+        if controller is not None:
+            try:
+                sa_density = _sa_pattern_state.get("loaded", {}).get("density")
+                sa_activity = round(min(1.0, sa_density / 1.2), 4) if sa_density is not None else None
+                await broadcast({
+                    "type": "chaos_state",
+                    "state": controller.get_state(),
+                    "glitch": _glitch_state,
+                    "energy": round(controller._compute_energy(), 4),
+                    "sa_activity": sa_activity,
+                })
+            except Exception:
+                pass
+
+        # Signal Flow ビュー用: 全モジュールの状態をまとめてブロードキャスト
+        try:
+            flow: dict = {}
+            if music_gen is not None:
+                flow["key"] = music_gen.get_state()
+            if controller is not None:
+                markov_state = controller.get_markov_state() if hasattr(controller, "get_markov_state") else None
+                flow["harmony"] = {
+                    "markov_state": markov_state,
+                    "running": controller._upper._running if hasattr(controller, "_upper") else None,
+                }
+            if tidal is not None:
+                flow["rhythm"] = {
+                    "preset": tidal.state.get("preset") if tidal.state else None,
+                    "tempo_bpm": tidal.state.get("tempo_bpm") if tidal.state else None,
+                    "running": tidal.is_running,
+                }
+            await broadcast({"type": "flow_state", "flow": flow})
+        except Exception:
+            pass
+
+        # SCノードツリー: 6秒ごとに /g_queryTree を scsynth へ送信
+        _node_tree_counter += 1
+        if _node_tree_counter >= 3 and sc_ready:
+            _node_tree_counter = 0
+            try:
+                # flag=0 → コントロール情報なし（ノード構造のみ）、group 0 = RootNode
+                sc_synth_client.send_message("/g_queryTree", [0, 0])
+            except Exception:
+                pass
+
+
 async def main() -> None:
     """OSCサーバーとWebSocketサーバーを同時に起動する。"""
-    global autonomous, controller, tidal, sequencer, musical, music_gen
+    global controller, tidal, sequencer, musical, music_gen
 
     _acquire_pid_lock()
     await asyncio.sleep(0.8)  # 旧プロセスの終了を待つ（イベントループをブロックしない）
 
-    autonomous = AutonomousMode(sc_client.send_message, broadcast)
     tidal = TidalController()
-    music_gen = MusicGenerator(tidal)
-    autonomous.set_tidal(tidal)
+    music_gen = MusicGenerator(tidal, broadcast=broadcast, send_osc=_send_osc)
     sequencer = TuringSequencer(sc_client.send_message, broadcast)
     controller = ThreeLayerController(
         _send_osc, broadcast, tidal_controller=tidal, send_tidal_ctrl=_send_tidal_ctrl
@@ -1236,6 +1428,9 @@ async def main() -> None:
 
     # SC を自動起動
     await start_sc()
+
+    # Studio Mode 用: 2秒ごとにコントローラー状態をブロードキャスト
+    asyncio.get_running_loop().create_task(_periodic_state_broadcast())
 
     try:
         await asyncio.Future()
