@@ -37,9 +37,6 @@
 ~matomaScDir = thisProcess.nowExecutingPath.dirname;
 "SC dir: %".format(~matomaScDir).postln;
 
-// MaToMa専用ポート（scsynth内部 57120/57121 と衝突しない）
-thisProcess.openUDPPort(57200);
-
 // GVerb 等の大型UGen に必要な RTメモリ（デフォルト 8MB → 128MB）
 s.options.memSize = 131072;
 
@@ -81,6 +78,11 @@ s.options.numInputBusChannels = 0;
 }.value;
 
 s.waitForBoot({
+    // scsynth が fork された後にポートを開く。
+    // 起動前に openUDPPort すると scsynth が fd を継承し、
+    // UDP パケットの到達先が sclang/scsynth 間で競合する。
+    // waitForBoot 内（scsynth 起動後）に呼ぶことで sclang だけが受信する。
+    thisProcess.openUDPPort(57200);
     "SCサーバー起動完了".postln;
     "MaToMa OSC受信ポート: 57200".postln;
     // ── 実際に使用されたサンプルレートとデバイスをログ出力 ───────────
@@ -1391,7 +1393,8 @@ s.waitForBoot({
         var amp  = msg[3].asFloat;
         var allowed = #[\matoma_rhythmic_grain, \matoma_rhythmic_klank,
                         \matoma_rhythmic_fm, \matoma_rhythmic_spring,
-                        \matoma_rhythmic_chaos, \matoma_pad];
+                        \matoma_rhythmic_chaos, \matoma_pad,
+                        \matoma_lead];
         {
             if (allowed.includes(synthName).not) {
                 "rhythmic/trigger: 許可されていないSynthDef '%' を無視".format(synthName).postln;
@@ -1592,6 +1595,13 @@ s.waitForBoot({
     load(~matomaScDir +/+ "drone_voicing.scd");
     s.sync;
     "ドローン・ボイシング ロード完了".postln;
+
+    // ── メロディーシンセ（Phase 1） ──────────────────────────────────────
+    //   Tidal から d8 $ s "matoma_lead" # freq "..." で呼び出す per-note シンセ。
+    //   OSCパスは /matoma/rhythmic/trigger を共有（BootTidal変更不要）。
+    load(~matomaScDir +/+ "melody.scd");
+    s.sync;
+    "メロディーシンセ (matoma_lead) ロード完了".postln;
 
     ~currentGlitchGendy = nil;
     ~currentGlitchChaos = nil;

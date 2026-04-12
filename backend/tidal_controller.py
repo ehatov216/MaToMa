@@ -11,12 +11,64 @@ GHCiプロセスを管理してTidal Cyclesのパターンを送信する。
 
 import glob
 import logging
+import os
 import subprocess
 import threading
 import time
 from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+
+def _find_ghci() -> str:
+    """Tidalパッケージが利用可能な ghci バイナリを返す。
+
+    ghcup と Homebrew など複数バージョンのGHCが共存する環境では、
+    PATH の順序によって Tidal 未インストールの GHC が選ばれることがある。
+    ここでは既知の候補パスを Tidal インストール済みのものから優先して返す。
+
+    macOS では ~/.ghcup/env が PATH 先頭に ~/.ghcup/bin を追加するため、
+    Homebrew経由でインストールした GHC 9.12.2 よりも ghcup 管理の 9.6.7 が
+    先に見つかることがある。この関数でその問題を回避する。
+    """
+    home = Path.home()
+    # 優先順: Homebrew → cabal → ghcup → PATH任せ
+    candidates = [
+        "/opt/homebrew/bin/ghci",             # macOS Homebrew (arm64)
+        "/usr/local/bin/ghci",                # macOS Homebrew (x86_64)
+        str(home / ".cabal" / "bin" / "ghci"),
+        str(home / ".ghcup" / "bin" / "ghci"),
+        "ghci",                               # フォールバック: PATH に任せる
+    ]
+    # 各候補で Sound.Tidal.Boot がインポートできるか確認
+    for path in candidates:
+        resolved = path if path != "ghci" else _which("ghci")
+        if not resolved:
+            continue
+        try:
+            result = subprocess.run(
+                [resolved, "-e", "import Sound.Tidal.Boot"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if result.returncode == 0:
+                log.info(f"Tidal 利用可能な ghci を発見: {resolved}")
+                return resolved
+            log.debug(f"ghci={resolved} では Tidal 未検出: {result.stderr[:120]}")
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    log.warning("Tidal が利用可能な ghci が見つかりませんでした。'ghci' にフォールバック。")
+    return "ghci"
+
+
+def _which(cmd: str) -> str | None:
+    """PATH を検索してコマンドのフルパスを返す。見つからなければ None。"""
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        p = Path(d) / cmd
+        if p.is_file() and os.access(p, os.X_OK):
+            return str(p)
+    return None
 
 
 def _find_boot_tidal() -> Path | None:
@@ -65,6 +117,8 @@ class TidalController:
         self._write_lock = threading.Lock()
         self._reader_thread: threading.Thread | None = None
         self._running = False
+        self._ready_event = threading.Event()
+        self._boot_failed = False
         # 現在の状態（GUIへの同期用）
         self.state: dict = {
             "tempo_bpm": 120.0,
@@ -93,7 +147,8 @@ class TidalController:
         resolved_boot = Path(boot_path) if boot_path else _find_boot_tidal()
 
         try:
-            cmd = ["ghci", "-v0"]  # -v0 = 最小ログ出力
+            ghci_path = _find_ghci()
+            cmd = [ghci_path, "-v0"]  # -v0 = 最小ログ出力
             if resolved_boot and resolved_boot.exists():
                 cmd += ["-ghci-script", str(resolved_boot)]
                 log.info(f"BootTidal.hs 使用: {resolved_boot}")
@@ -116,17 +171,38 @@ class TidalController:
             return False
 
         # バックグラウンドでGHCiの出力を読む
+        self._ready_event.clear()
+        self._boot_failed = False
         self._reader_thread = threading.Thread(
             target=self._read_output, daemon=True
         )
         self._reader_thread.start()
 
-        # 起動を待つ
-        time.sleep(3)
-
         # BootTidal.hs がない場合は手動セットアップ
         if not resolved_boot or not resolved_boot.exists():
             self._manual_setup()
+
+        # GHCi スクリプト完了後にセンチネルを送って起動完了を検知する
+        # stdin はスクリプト終了後にキューが処理されるため、確実に最後に実行される
+        self._write('putStrLn "MATOMA_READY"')
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            if self._boot_failed:
+                log.warning("GHCi/Tidal 起動中にエラーを検出しました")
+                self._running = False
+                return False
+            if self._ready_event.is_set():
+                break
+            time.sleep(0.1)
+        else:
+            log.warning("GHCi/Tidal 起動が30秒でタイムアウトしました")
+            self._running = False
+            return False
+
+        if self._proc is None or self._proc.poll() is not None:
+            log.warning("GHCi/Tidal 起動中にプロセスが終了しました")
+            self._running = False
+            return False
 
         self._running = True
         log.info("Tidal Cycles 起動完了")
@@ -180,15 +256,37 @@ class TidalController:
         time.sleep(0.3)
 
     def _read_output(self) -> None:
-        """GHCiの出力をバックグラウンドで読み捨てる（ブロック防止）。"""
+        """GHCiの出力をバックグラウンドで読み、起動完了センチネルを検知する。"""
         while self._proc:
             try:
                 if self._proc.stdout:
                     line = self._proc.stdout.readline()
                     if line:
-                        log.debug(f"GHCi: {line.rstrip()}")
+                        stripped = line.rstrip()
+                        if stripped:
+                            log.info(f"[GHCi] {stripped}")
+                        if not self._ready_event.is_set() and self._looks_like_boot_error(stripped):
+                            self._boot_failed = True
+                        if "MATOMA_READY" in stripped:
+                            log.info("Tidal起動完了（MATOMA_READY検出）")
+                            self._ready_event.set()
             except Exception:
                 break
+
+    @staticmethod
+    def _looks_like_boot_error(line: str) -> bool:
+        """起動失敗として扱う GHCi エラー行を判定する。"""
+        return any(
+            marker in line
+            for marker in (
+                "Could not find module",
+                "Not in scope:",
+                "Variable not in scope:",
+                "Data constructor not in scope:",
+                "Type constructor or class",
+                "error:",
+            )
+        )
 
     def _write(self, code: str) -> None:
         """GHCiのstdinにコードを書き込む。"""

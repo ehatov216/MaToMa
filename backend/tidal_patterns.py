@@ -27,10 +27,11 @@ SYNTH_FM = "matoma_rhythmic_fm"         # Autechre的・予測不能
 SYNTH_SPRING = "matoma_rhythmic_spring" # 有機的・金属的共鳴
 SYNTH_CHAOS = "matoma_rhythmic_chaos"   # 機械が壊れる感覚
 SYNTH_GRAIN = "matoma_rhythmic_grain"   # グラニュラー打撃
+SYNTH_LEAD = "matoma_lead"              # Phase 1メロディー（per-note）
 
 # 全シンセ名のリスト（UIなどで参照用）
 ALL_SYNTHS: list[str] = [
-    SYNTH_KLANK, SYNTH_FM, SYNTH_SPRING, SYNTH_CHAOS, SYNTH_GRAIN,
+    SYNTH_KLANK, SYNTH_FM, SYNTH_SPRING, SYNTH_CHAOS, SYNTH_GRAIN, SYNTH_LEAD,
 ]
 
 
@@ -237,6 +238,41 @@ def get_preset(name: str) -> list[str]:
         Tidal コードのリスト。不明な名前の場合は minimal_klank。
     """
     return PRESETS.get(name, PRESETS["minimal_klank"])
+
+
+# ── Phase 1: メロディーパターン生成 ──────────────────────────────────
+
+def make_melody_pattern(
+    track: int,
+    freqs: list[float],
+    slow_factor: float = 1.0,
+    amp: float = 0.4,
+) -> str:
+    """SA の pitch_class_distribution から得た周波数列をメロディーパターンに変換する。
+
+    Tidal の angle-bracket <f1 f2 f3> 構文を使い、
+    1サイクルに1音ずつ順番に演奏する（最小単位のメロディー）。
+
+    Args:
+        track: Tidalトラック番号（d1〜d16）
+        freqs: 演奏する周波数リスト（Hz）。2〜6個が適切。
+        slow_factor: 全体のテンポを遅くする倍率（1.0=そのまま、2.0=2倍遅い）
+        amp: 音量（0.0〜1.0）
+
+    Returns:
+        Tidal コード文字列。
+        例: 'd8 $ s "matoma_lead" # freq "<261.63 293.66 329.63>" # amp 0.40'
+    """
+    if not freqs:
+        freqs = [261.63]  # フォールバック: C4
+    freq_str = "<" + " ".join(f"{f:.2f}" for f in freqs) + ">"
+    slow_part = f" # slow {slow_factor:.1f}" if slow_factor != 1.0 else ""
+    return (
+        f'd{track} $ s "{SYNTH_LEAD}"'
+        f' # freq "{freq_str}"'
+        f' # amp {amp:.2f}'
+        f'{slow_part}'
+    )
 
 
 def hush_all(num_tracks: int = 8) -> list[str]:

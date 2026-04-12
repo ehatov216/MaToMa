@@ -30,6 +30,7 @@ from typing import Optional
 
 from tidal_patterns import (
     SYNTH_CHAOS, SYNTH_FM, SYNTH_GRAIN, SYNTH_KLANK, SYNTH_SPRING,
+    make_melody_pattern,
 )
 
 log = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ class TidalSeed:
     bpm: float
     rhythm_lines: list[str]   # d1〜d3
     harmony_lines: list[str]  # d5〜d6（スロー・ハーモニック）
+    melody_lines: list[str]   # d8（Phase 1: matoma_lead メロディー）
     notes_str: str            # UI表示用ノート名列（例: "eb3 g3 bb3"）
     source_track_id: str
 
@@ -362,64 +364,70 @@ def generate_tidal_seed(record: SonicAnatomyRecord) -> TidalSeed:
     else:
         primary_synth, sub_synth = SYNTH_KLANK, SYNTH_FM
 
-    # d1: メインリズム（ThreeLayerController の rhythmic レイヤーで動的制御）
-    # cF default "key" で Tidal Control Channel(port 6010)の値を参照
+    # ハーモニー：コード進行 + ピッチクラス分布から周波数を算出
+    # （d1-d3 の freq にも使うため先に計算する）
+    chord_freqs = chord_progression_to_freqs(
+        record.chord_progression, record.key_root, record.key_mode, octave=3
+    )
+    # メロディー用：スケール音上位4音（オクターブ4）
+    melody_freqs = pitch_class_to_freqs(
+        record.pitch_class_distribution, record.key_root, record.key_mode,
+        top_n=4, octave=4,
+    )
+    chord_freq_pat = _freqs_to_tidal(chord_freqs)
+
+    # d1: メインリズム（コントロールチャンネル不使用 — 実値を直接埋め込む）
     if struct_pat:
         d1 = (
-            f'd1 $ degradeBy (cF 0.3 "rhythmic_degrade") $ {struct_pat}'
+            f'd1 $ degradeBy {degrade:.2f} $ {struct_pat}'
             f' $ s "{primary_synth}"'
-            f' # amp (cF 0.5 "rhythmic_amp")'
-            f' # freq (cF 300.0 "rhythmic_freq")'
+            f' # amp 0.5'
+            f' # freq {chord_freq_pat}'
         )
     else:
         hits = max(1, min(7, round(record.onset_density * 8)))
         d1 = (
-            f'd1 $ degradeBy (cF 0.3 "rhythmic_degrade") $ euclid {hits} 8'
+            f'd1 $ degradeBy {degrade:.2f} $ euclid {hits} 8'
             f' $ s "{primary_synth}"'
-            f' # amp (cF 0.5 "rhythmic_amp")'
-            f' # freq (cF 300.0 "rhythmic_freq")'
+            f' # amp 0.5'
+            f' # freq {chord_freq_pat}'
         )
 
     # d2: サブリズム（7ステップ Euclidean — 4/4 と位相がずれる）
     hits2 = max(1, min(5, round(record.onset_density * 6) + 1))
     d2 = (
         f'd2 $ euclid {hits2} 7 $ s "{sub_synth}"'
-        f' # amp ((cF 0.5 "rhythmic_amp") * 0.7)'
-        f' # freq (cF 300.0 "rhythmic_freq")'
+        f' # amp 0.35'
+        f' # freq {chord_freq_pat}'
     )
 
     # d3: スパース呼吸層（SPRING をゆっくり、degrade に +0.2 上乗せ）
-    # rhythmic_degrade の上限は PARAM_SPECS で 0.70 なので +0.2 = 最大 0.90
+    degrade3 = min(0.95, degrade + 0.2)
     d3 = (
-        f'd3 $ degradeBy ((cF 0.3 "rhythmic_degrade") + 0.2) $ slow 3'
+        f'd3 $ degradeBy {degrade3:.2f} $ slow 3'
         f' $ s "{SYNTH_SPRING}"'
-        f' # amp ((cF 0.5 "rhythmic_amp") * 0.55)'
-        f' # freq (cF 300.0 "rhythmic_freq")'
+        f' # amp 0.28'
+        f' # freq {chord_freq_pat}'
     )
 
     rhythm_lines = [d1, d2, d3]
 
-    # ハーモニー：コード進行 + ピッチクラス分布から周波数を算出
-    chord_freqs = chord_progression_to_freqs(
-        record.chord_progression, record.key_root, record.key_mode, octave=3
-    )
-    melody_freqs = pitch_class_to_freqs(
-        record.pitch_class_distribution, record.key_root, record.key_mode,
-        top_n=3, octave=4,
-    )
-
     harmony_lines = [
         (
             f'd5 $ slow 8 $ s "{SYNTH_SPRING}"'
-            f' # freq {_freqs_to_tidal(chord_freqs)} # amp 0.35'
+            f' # freq {chord_freq_pat} # amp 0.35'
         ),
         (
-            # ThreeLayerController が継続的に演算する melody_note (MIDIノート番号) を参照。
-            # cF 60 "melody_note" で Tidal Control Channel(port 6010)から取得し、
-            # SuperDirt の note パラメーターがfreqに変換する。
             f'd6 $ degradeBy 0.4 $ slow 12 $ s "{SYNTH_GRAIN}"'
-            f' # note (cF 60 "melody_note") # amp 0.25'
+            f' # freq {_freqs_to_tidal(melody_freqs)} # amp 0.25'
         ),
+    ]
+
+    # Phase 1: メロディーライン（d8 に matoma_lead でスケール音を演奏）
+    # BPMが高い曲は slow 2 を入れてメロディーを落ち着かせる
+    melody_slow = 2.0 if record.bpm > 120 else 1.0
+    melody_lines = [
+        make_melody_pattern(track=8, freqs=melody_freqs, slow_factor=melody_slow),
     ]
 
     # UI表示用ノート名（コード進行のルート音を使う）
@@ -431,6 +439,7 @@ def generate_tidal_seed(record: SonicAnatomyRecord) -> TidalSeed:
         bpm=record.bpm,
         rhythm_lines=rhythm_lines,
         harmony_lines=harmony_lines,
+        melody_lines=melody_lines,
         notes_str=notes_str,
         source_track_id=record.track_id,
     )
@@ -444,6 +453,7 @@ def seed_to_dict(seed: TidalSeed) -> dict:
         "bpm": seed.bpm,
         "rhythm_lines": seed.rhythm_lines,
         "harmony_lines": seed.harmony_lines,
+        "melody_lines": seed.melody_lines,
         "notes": seed.notes_str,
-        "all_lines": seed.rhythm_lines + seed.harmony_lines,
+        "all_lines": seed.rhythm_lines + seed.harmony_lines + seed.melody_lines,
     }

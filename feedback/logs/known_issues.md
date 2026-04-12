@@ -1,11 +1,55 @@
 # MaToMa 既知の問題と解決策
 
-> 更新日: 2026-03-30
+> 更新日: 2026-04-12
 > 再発防止・最速解決のためのトラブルシューティングログ
 
 ---
 
 ## 🔇 音が出ない問題
+
+### 問題Z: Tidal→SC UDP受信がscsynth/sclang間で競合し音が出ない【2026-04-12 修正済み】
+
+**症状:** `test_tidal.py` でTidalパターンを送信してもSCのOSCdefが発火しない。まれに一瞬だけリズム音が聞こえるが、その後無音になる
+**根本原因:** `sc/run_headless.scd` の `thisProcess.openUDPPort(57200)` が `s.waitForBoot` より前に呼ばれていた。
+  sclangがscsynth（`scsynth`プロセス）をforkする際、開いているファイルディスクリプタ（fd）が子プロセスに継承される。
+  結果、sclangとscsynthの両方が同じUDPソケット（ポート57200）を `SO_REUSEADDR` で保持する。
+  OSはUDPパケットを**どちらか一方にしか届けない**（`recvfrom()` を先に呼んだプロセスが取得）。
+  scsynth側が勝った場合、`/matoma/rhythmic/trigger` メッセージはscsynth内部で無視され、sclangのOSCdefは発火しない。
+
+**診断手順:**
+
+1. `lsof -i :57200` を実行し、sclang と scsynth の両方が同一inode（`0x81b4...`）のソケットを持っていれば本問題
+2. `backend/test_tidal_osc_debug.py` を実行し、ポート57201でTidal→OCSパケットが届くか確認
+   - 届く → Tidal側は正常。問題はSC側のポート競合
+   - 届かない → Tidalの起動・パターン評価を確認
+
+**修正（2026-04-12）:** `sc/run_headless.scd` の `thisProcess.openUDPPort(57200)` を `s.waitForBoot` コールバックの内側に移動
+
+```supercollider
+// 修正前（41行目、waitForBoot より前）
+thisProcess.openUDPPort(57200);
+s.waitForBoot({
+    ...
+});
+
+// 修正後
+s.waitForBoot({
+    // scsynth が fork された後にポートを開く。
+    // 起動前に openUDPPort すると scsynth が fd を継承し、
+    // UDP パケットの到達先が sclang/scsynth 間で競合する。
+    thisProcess.openUDPPort(57200);
+    ...
+});
+```
+
+修正後は `lsof -i :57200` で sclang のみがポートを保持し、scsynthには見えない。
+  SCログに `リズムトリガー: matoma_rhythmic_klank freq:440.0 amp:0.7` が毎ビート出力されることで確認。
+
+**教訓:** SuperCollider でカスタムUDPポートを開く場合は**必ず `s.waitForBoot` コールバック内**で行う。
+  `waitForBoot` より前に `openUDPPort` を呼ぶと、scsynth の fork によってポートを共有してしまい、
+  Tidalなど外部OSCクライアントからのメッセージがsclang側に届かなくなる。
+
+---
 
 ### 問題Y: LocalIn/LocalOut フィードバックがSCサーバー全体をミュートする【2026-03-30 修正済み】
 

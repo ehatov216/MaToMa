@@ -41,9 +41,9 @@ let matomaShape = OSC "/matoma/rhythmic/trigger" $ ArgList [("s", Nothing), ("fr
 default (Rational, Integer, Double, Pattern String)
 
 -- Tidal を MaToMa ターゲットで起動
--- cCtrlListen = True : Python から /ctrl OSC を受け取り cF/cI で参照できるようにする
--- cCtrlPort = 6010   : Tidal Control Channel のポート（SC の 57200 とは別）
-tidalInst <- mkTidalWith [(matomaTarget, [matomaShape])] (defaultConfig { cCtrlListen = True, cCtrlPort = 6010 })
+-- cCtrlListen = False: コントロールチャンネル（port 6010）を使わない
+--   → 旧 GHCi プロセスが残っていても port 競合でクラッシュしない
+tidalInst <- mkTidalWith [(matomaTarget, [matomaShape])] (defaultConfig { cCtrlListen = False })
 
 instance Tidally where tidal = tidalInst
 

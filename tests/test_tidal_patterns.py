@@ -30,8 +30,8 @@ from backend.tidal_patterns import (
 # ── 定数 ──────────────────────────────────────────────────────────────────────
 
 class TestConstants:
-    def test_all_synths_has_five_entries(self):
-        assert len(ALL_SYNTHS) == 5
+    def test_all_synths_has_six_entries(self):
+        assert len(ALL_SYNTHS) == 6
 
     def test_all_synths_contains_expected(self):
         assert SYNTH_KLANK in ALL_SYNTHS
@@ -39,6 +39,7 @@ class TestConstants:
         assert SYNTH_SPRING in ALL_SYNTHS
         assert SYNTH_CHAOS in ALL_SYNTHS
         assert SYNTH_GRAIN in ALL_SYNTHS
+        assert "matoma_lead" in ALL_SYNTHS
 
     def test_fibonacci_starts_correctly(self):
         assert FIBONACCI[:5] == [1, 1, 2, 3, 5]

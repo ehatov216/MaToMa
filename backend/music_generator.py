@@ -99,6 +99,55 @@ DEGREE_TRANSITIONS: dict[str, dict[str, float]] = {
     "VII": {"I": 0.55, "V": 0.25, "II": 0.20},
 }
 
+# ローマ数字の正規化: 大文字に統一・品質サフィックスを除去・括弧コードを"other"に
+_ROMAN_QUALITY_STRIP = str.maketrans("", "", "majminaugdim+°")
+_VALID_DEGREES = {"I", "II", "III", "IV", "V", "VI", "VII"}
+
+
+def _normalize_roman(roman: str) -> str:
+    """SAコード進行のローマ数字を標準7度数に正規化する。
+
+    - 括弧コード "(F#)maj" → "other"（調外音はアーティスト特有の逸脱）
+    - "IIImaj" → "III", "ivmaj" → "IV" など品質・ケースを除去
+    """
+    if roman.startswith("("):
+        return "other"
+    # 大文字化→品質サフィックス除去
+    upper = roman.upper().translate(_ROMAN_QUALITY_STRIP).strip()
+    return upper if upper in _VALID_DEGREES else "other"
+
+
+def _build_sa_transition_matrix(
+    chord_progression: list[dict],
+) -> dict[str, dict[str, float]]:
+    """SAコード進行データからMarkov遷移行列を構築する。
+
+    chord_progression内の連続コードペアをカウントし、行ごとに正規化して
+    確率分布を返す。"other"はカウントに含まれるが行列キーとしても使われる。
+
+    Returns:
+        {from_degree: {to_degree: probability}}
+        空データや単一コードの場合は空の dict を返す。
+    """
+    # ローマ数字を正規化して連続ペアをカウント
+    degrees = [
+        _normalize_roman(c.get("roman", "I")) for c in chord_progression
+    ]
+    counts: dict[str, dict[str, float]] = {}
+    for i in range(len(degrees) - 1):
+        src, dst = degrees[i], degrees[i + 1]
+        if src not in counts:
+            counts[src] = {}
+        counts[src][dst] = counts[src].get(dst, 0.0) + 1.0
+
+    # 行ごとに正規化
+    matrix: dict[str, dict[str, float]] = {}
+    for src, dsts in counts.items():
+        total = sum(dsts.values())
+        matrix[src] = {d: v / total for d, v in dsts.items()}
+
+    return matrix
+
 
 # ── ヘルパー関数 ────────────────────────────────────────────────────────────
 
@@ -397,6 +446,61 @@ def _build_diatonic_voicing(
     ]
 
 
+def _minimize_voice_leading(
+    prev_voicing: list[float],
+    next_voicing: list[float],
+) -> list[float]:
+    """前回ボイシングから次回ボイシングへの総セミトーン移動量を最小化する。
+
+    各音を ±12 半音（1オクターブ）の範囲で最寄りの位置に動かし、
+    前回との距離の合計が最小になるよう音を並び替えて返す。
+
+    Args:
+        prev_voicing: 前回コードのHz周波数リスト（空の場合は next_voicing そのまま）
+        next_voicing: 今回コードのHz周波数リスト
+
+    Returns:
+        voice leading 最適化後のHz周波数リスト（要素数は next_voicing と同じ）
+    """
+    if not prev_voicing or not next_voicing:
+        return list(next_voicing)
+
+    prev_midi = [_hz_to_midi(f) for f in prev_voicing]
+    next_midi = [_hz_to_midi(f) for f in next_voicing]
+
+    # 各 next 音を prev の各音に最も近いオクターブへ移動させた候補を作る
+    def _closest(src: float, target: float) -> float:
+        """target を src に最も近いオクターブに移動させた MIDI 値を返す。"""
+        diff = (target - src + 6) % 12 - 6  # -6 〜 +5 に丸める
+        return src + diff
+
+    # 貪欲に prev の各音に最も近い next 音を割り当てる（簡易最適化）
+    used = [False] * len(next_midi)
+    result_midi: list[float] = []
+    for p in prev_midi:
+        best_idx = -1
+        best_dist = float("inf")
+        for i, n in enumerate(next_midi):
+            if used[i]:
+                continue
+            candidate = _closest(p, n)
+            dist = abs(candidate - p)
+            if dist < best_dist:
+                best_dist = dist
+                best_idx = i
+        if best_idx >= 0:
+            used[best_idx] = True
+            result_midi.append(_closest(p, next_midi[best_idx]))
+        # prev 音に対応できなかった場合はスキップ（次の処理で補完）
+
+    # next 側に余りがあれば末尾に追加
+    for i, n in enumerate(next_midi):
+        if not used[i]:
+            result_midi.append(float(n))
+
+    return [_midi_to_hz(m) for m in result_midi]
+
+
 @dataclass
 class GlobalClock:
     """スケール状態をTidalサイクル境界で安全に切り替える。"""
@@ -436,6 +540,11 @@ class MiddleLayerContext:
     current_degree: str
     sa_chord_sequence: tuple  # tuple[str, ...]
     sa_chord_idx: int
+    # Phase 1: SA遷移行列とのブレンド率（0.0=理論Markov, 1.0=SA派生）
+    divergence_rate: float = 0.0
+    # Phase 1: SA由来の遷移行列（frozenのためtuple of tuples で格納）
+    # 例: (("I", (("IV", 0.5), ("V", 0.5))), ...)
+    sa_transition_matrix: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -455,6 +564,8 @@ class LowerLayerContext:
     arc_phase: float
     synth_a: str
     synth_b: str
+    # Phase 2: 前のコードボイシング（Hzリスト）、ボイスリーディング最小化に使用
+    prev_voicing: tuple = ()  # tuple[float, ...]
 
 
 class MiddleLayerStrategy(Protocol):
@@ -480,13 +591,45 @@ class GravityMarkovStrategy:
         dna = ctx.dna
         sa_seq = list(ctx.sa_chord_sequence)
         sa_idx = ctx.sa_chord_idx
+        divergence_rate = ctx.divergence_rate
 
         gravity_type = dna.get("chord_gravity", "tonic")
         gravity_map = GRAVITY.get(gravity_type, GRAVITY["tonic"])
         gravity_raw = {d: gravity_map.get(d, 0.0) for d in all_degrees}
 
-        markov_map = DEGREE_TRANSITIONS.get(ctx.current_degree, {})
-        markov_raw = {d: markov_map.get(d, 0.0) for d in all_degrees}
+        # Phase 1: divergence_rate で DEGREE_TRANSITIONS と SA遷移行列をブレンド
+        # 0.0 = 純粋な音楽理論Markov, 1.0 = SA由来の遷移行列
+        theory_map = DEGREE_TRANSITIONS.get(ctx.current_degree, {})
+        theory_raw = {d: theory_map.get(d, 0.0) for d in all_degrees}
+
+        if divergence_rate > 0.0 and ctx.sa_transition_matrix:
+            # tuple of tuples → dict に復元
+            sa_matrix = {
+                src: dict(dsts)
+                for src, dsts in ctx.sa_transition_matrix
+            }
+            sa_map = sa_matrix.get(ctx.current_degree, {})
+            sa_markov_raw = {d: sa_map.get(d, 0.0) for d in all_degrees}
+
+            sa_total = sum(sa_markov_raw.values())
+            if sa_total > 0:
+                sw = {d: sa_markov_raw[d] / sa_total for d in all_degrees}
+            else:
+                sw = {d: 1.0 / len(all_degrees) for d in all_degrees}
+
+            t_total = sum(theory_raw.values())
+            uniform_t = 1.0 / len(all_degrees)
+            tw = (
+                {d: theory_raw[d] / t_total for d in all_degrees}
+                if t_total > 0 else {d: uniform_t for d in all_degrees}
+            )
+            # 線形ブレンド: (1 - rate) × 理論 + rate × SA
+            markov_raw = {
+                d: (1.0 - divergence_rate) * tw[d] + divergence_rate * sw[d]
+                for d in all_degrees
+            }
+        else:
+            markov_raw = theory_raw
 
         uniform = 1.0 / len(all_degrees)
         g_total = sum(gravity_raw.values())
@@ -514,8 +657,8 @@ class GravityMarkovStrategy:
 
         log.debug(
             "MiddleLayer[GravityMarkov]: コード度数 → %s "
-            "(SA引力点=%s, Markov元=%s)",
-            chosen, sa_degree or "none", ctx.current_degree,
+            "(SA引力点=%s, Markov元=%s, divergence=%.2f)",
+            chosen, sa_degree or "none", ctx.current_degree, divergence_rate,
         )
         return MiddleLayerResult(degree=chosen, sa_chord_idx=new_idx)
 
@@ -557,7 +700,9 @@ class EuclidTemplateStrategy:
             root_hz = _midi_to_hz(melody_octave * 12 + scale.root_semitone)
             raw_main = [root_hz, root_hz * 1.498]
 
-        chord_hz = _build_diatonic_voicing(degree, scale, octave=3)
+        raw_chord_hz = _build_diatonic_voicing(degree, scale, octave=3)
+        # Phase 2: voice leading — 前回コードへの移動量を最小化
+        chord_hz = _minimize_voice_leading(list(ctx.prev_voicing), raw_chord_hz)
         shifted_main = _apply_degree_shift(raw_main, degree)
         root_s = scale.root_semitone
         quantized_main = [
@@ -679,7 +824,9 @@ class LSystemStrategy:
             root_hz = _midi_to_hz(melody_octave * 12 + scale.root_semitone)
             raw_main = [root_hz, root_hz * 1.498]
 
-        chord_hz = _build_diatonic_voicing(degree, scale, octave=3)
+        raw_chord_hz = _build_diatonic_voicing(degree, scale, octave=3)
+        # Phase 2: voice leading — 前回コードへの移動量を最小化
+        chord_hz = _minimize_voice_leading(list(ctx.prev_voicing), raw_chord_hz)
         shifted_main = _apply_degree_shift(raw_main, degree)
         root_s = scale.root_semitone
         quantized_main = [
@@ -779,6 +926,12 @@ class MusicGenerator:
         self._sa_chord_idx: int = 0
         # SAデータの活動量に基づく3層制御の緩和倍率（1.0=通常、最大8.0=ドローン）
         self._sa_activity_multiplier: float = 1.0
+        # Phase 1: divergence_rate（0.0=理論Markov, 1.0=SA派生行列）
+        self._divergence_rate: float = 0.0
+        # Phase 1: SAコード進行から構築したMarkov遷移行列
+        self._sa_transition_matrix: dict[str, dict[str, float]] = {}
+        # Phase 2: 前のコードボイシング（ボイスリーディング最小化用）
+        self._prev_voicing: list[float] = []
         # 交換可能なStrategy（実行時に set_middle_strategy / set_lower_strategy で変更可）
         self._middle_strategy: MiddleLayerStrategy = GravityMarkovStrategy()
         self._lower_strategy: LowerLayerStrategy = EuclidTemplateStrategy()
@@ -834,6 +987,9 @@ class MusicGenerator:
         multiplier = _compute_sa_activity_multiplier(
             record.onset_density, sa_seq
         )
+        # Phase 1: SA遷移行列を構築（divergence_rate > 0 のときに使われる）
+        sa_matrix = _build_sa_transition_matrix(record.chord_progression)
+
         with self._lock:
             self._seed = record
             self._pad_dirty = True
@@ -841,6 +997,7 @@ class MusicGenerator:
             self._sa_chord_sequence = sa_seq
             self._sa_chord_idx = 0
             self._sa_activity_multiplier = multiplier
+            self._sa_transition_matrix = sa_matrix
 
         mode = (
             record.key_mode if record.key_mode in SCALE_INTERVALS else "minor"
@@ -944,8 +1101,23 @@ class MusicGenerator:
     def set_density(self, density: float) -> None:
         """onset_density を上書きする（0.0〜1.0）。Noneで解除。"""
         with self._lock:
-            self._density_override = max(0.0, min(1.0, density)) if density is not None else None
+            self._density_override = (
+                max(0.0, min(1.0, density))
+                if density is not None else None
+            )
         log.info("LowerLayer density override: %s", self._density_override)
+
+    def set_divergence(self, rate: float) -> None:
+        """divergence_rate を設定する（0.0〜1.0）。
+
+        0.0 = 純粋な音楽理論Markov遷移（DEGREE_TRANSITIONS のみ使用）
+        1.0 = SAコード進行由来の遷移行列のみ使用
+        中間値は線形ブレンド。
+        """
+        clamped = max(0.0, min(1.0, rate))
+        with self._lock:
+            self._divergence_rate = clamped
+        log.info("MiddleLayer divergence_rate → %.2f", clamped)
 
     def get_state(self) -> dict:
         """UI向けの現在状態スナップショットを返す。"""
@@ -961,6 +1133,7 @@ class MusicGenerator:
             upper_every = self._upper_every
             lines = list(self._last_tidal_lines)
             density = self._density_override
+            divergence_rate = self._divergence_rate
             mid_name = type(self._middle_strategy).__name__
             low_name = type(self._lower_strategy).__name__
 
@@ -996,6 +1169,7 @@ class MusicGenerator:
             # メタ
             "arc_phase": round(arc, 2),
             "density_override": density,
+            "divergence_rate": round(divergence_rate, 2),
             "middle_strategy": mid_name,
             "lower_strategy": low_name,
         }
@@ -1087,6 +1261,12 @@ class MusicGenerator:
             sa_seq = tuple(self._sa_chord_sequence)
             sa_idx = self._sa_chord_idx
             strategy = self._middle_strategy
+            divergence_rate = self._divergence_rate
+            # SA遷移行列を frozen な tuple of tuples に変換して Context へ渡す
+            sa_matrix_tuple = tuple(
+                (src, tuple(dsts.items()))
+                for src, dsts in self._sa_transition_matrix.items()
+            )
 
         if not dna:
             return
@@ -1096,6 +1276,8 @@ class MusicGenerator:
             current_degree=current_degree,
             sa_chord_sequence=sa_seq,
             sa_chord_idx=sa_idx,
+            divergence_rate=divergence_rate,
+            sa_transition_matrix=sa_matrix_tuple,
         )
         result = strategy.tick(ctx)
         with self._lock:
@@ -1120,6 +1302,7 @@ class MusicGenerator:
             arc_phase = self._arc_phase
             strategy = self._lower_strategy
             density_override = self._density_override
+            prev_voicing = list(self._prev_voicing)  # Phase 2: コピーして渡す
 
         if not dna:
             return []
@@ -1136,8 +1319,16 @@ class MusicGenerator:
             arc_phase=arc_phase,
             synth_a=self._SYNTH_A,
             synth_b=self._SYNTH_B,
+            prev_voicing=tuple(prev_voicing),  # Phase 2
         )
-        return strategy.generate(ctx, include_pads)
+        lines = strategy.generate(ctx, include_pads)
+
+        # Phase 2: 生成後、今回のコードボイシングを保存（次 tick のベースに使う）
+        new_chord = _build_diatonic_voicing(degree, scale, octave=3)
+        with self._lock:
+            self._prev_voicing = new_chord
+
+        return lines
 
     # ── 生成ループ ───────────────────────────────────────────────────────────
 
