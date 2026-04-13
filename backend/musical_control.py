@@ -371,18 +371,16 @@ class MusicalControl:
     def _generate_tidal_code(self) -> str:
         """コードディグリー・キー・スケールから Tidal コードを生成する。
 
-        n (scale ...) ではなく freq "<hz1 hz2 hz3>" を使う。
-        BootTidal_matoma.hs の ArgList に n が含まれないため、
-        Tidal の n パラメーターは SC に届かず 440Hz 固定になってしまう。
-        Python 側で Hz を計算して freq に直接渡すことで正しい音程を実現する。
+        n (scale "scale_name" "degrees") + midi_base 形式を使う。
         """
         key, scale = self._resolve_key_scale()
         degree = self._resolve_chord_degree()
 
         midi_base = KEY_MIDI_BASE.get(key, 48)
         voicing = CHORD_VOICING.get(degree % 8, [0, 2, 4])
+        voicing_str = " ".join(str(v) for v in voicing)
 
-        hz_values = [self._scale_idx_to_hz(midi_base, scale, idx) for idx in voicing]
-        freq_str = " ".join(f"{hz:.1f}" for hz in hz_values)
-
-        return f'd8 $ freq "<{freq_str}>" # s "matoma_pad" # gain 0.5'
+        return (
+            f'd8 $ n (scale "{scale}" "{voicing_str}") + {midi_base}'
+            f' # s "matoma_pad" # gain 0.5'
+        )

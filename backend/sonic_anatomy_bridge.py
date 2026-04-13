@@ -376,35 +376,35 @@ def generate_tidal_seed(record: SonicAnatomyRecord) -> TidalSeed:
     )
     chord_freq_pat = _freqs_to_tidal(chord_freqs)
 
-    # d1: メインリズム（コントロールチャンネル不使用 — 実値を直接埋め込む）
+    # d1: メインリズム（cF コントロールチャンネル経由で ThreeLayerController と連動）
+    ref_freq = f'{chord_freqs[0]:.1f}' if chord_freqs else '130.8'
     if struct_pat:
         d1 = (
-            f'd1 $ degradeBy {degrade:.2f} $ {struct_pat}'
+            f'd1 $ degradeBy (cF "rhythmic_degrade" {degrade:.2f}) $ {struct_pat}'
             f' $ s "{primary_synth}"'
-            f' # amp 0.5'
-            f' # freq {chord_freq_pat}'
+            f' # amp (cF "rhythmic_amp" 0.5)'
+            f' # freq (cF "rhythmic_freq" {ref_freq})'
         )
     else:
         hits = max(1, min(7, round(record.onset_density * 8)))
         d1 = (
-            f'd1 $ degradeBy {degrade:.2f} $ euclid {hits} 8'
+            f'd1 $ degradeBy (cF "rhythmic_degrade" {degrade:.2f}) $ euclid {hits} 8'
             f' $ s "{primary_synth}"'
-            f' # amp 0.5'
-            f' # freq {chord_freq_pat}'
+            f' # amp (cF "rhythmic_amp" 0.5)'
+            f' # freq (cF "rhythmic_freq" {ref_freq})'
         )
 
     # d2: サブリズム（7ステップ Euclidean — 4/4 と位相がずれる）
     hits2 = max(1, min(5, round(record.onset_density * 6) + 1))
     d2 = (
         f'd2 $ euclid {hits2} 7 $ s "{sub_synth}"'
-        f' # amp 0.35'
+        f' # amp (cF "rhythmic_amp" 0.35)'
         f' # freq {chord_freq_pat}'
     )
 
     # d3: スパース呼吸層（SPRING をゆっくり、degrade に +0.2 上乗せ）
-    degrade3 = min(0.95, degrade + 0.2)
     d3 = (
-        f'd3 $ degradeBy {degrade3:.2f} $ slow 3'
+        f'd3 $ degradeBy (cF "rhythmic_degrade" {degrade:.2f} + 0.2) $ slow 3'
         f' $ s "{SYNTH_SPRING}"'
         f' # amp 0.28'
         f' # freq {chord_freq_pat}'
@@ -419,7 +419,7 @@ def generate_tidal_seed(record: SonicAnatomyRecord) -> TidalSeed:
         ),
         (
             f'd6 $ degradeBy 0.4 $ slow 12 $ s "{SYNTH_GRAIN}"'
-            f' # freq {_freqs_to_tidal(melody_freqs)} # amp 0.25'
+            f' # note (cF 60 "melody_note") # amp 0.25'
         ),
     ]
 
